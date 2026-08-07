@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite" // change to "postgresql" for production
+  provider = "postgresql" // sqlite for local dev, postgresql for production (Vercel/Neon)
   url      = env("DATABASE_URL")
 }
 
@@ -54,18 +54,25 @@ model Booking {
   cleaningFee  Int           // cents
   taxTotal     Int           // cents
   total        Int           // cents
-  status       String        @default("PENDING")  // PENDING, CONFIRMED, CANCELLED, COMPLETED
-  paymentType  String        @default("INQUIRY") // INQUIRY, STRIPE
+  status       BookingStatus @default(PENDING)
+  paymentType  PaymentType   @default(INQUIRY)
   stripeSessionId String?
   notes        String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
 
-// BookingStatus values: PENDING, CONFIRMED, CANCELLED, COMPLETED
-// PaymentType values: INQUIRY, STRIPE
-// Using String fields instead of enums for SQLite compatibility.
-// Switch to enums when using PostgreSQL in production.
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentType {
+  INQUIRY
+  STRIPE
+}
 
 // Manually blocked dates (host closes dates, or maintenance, etc)
 model BlockedDate {
