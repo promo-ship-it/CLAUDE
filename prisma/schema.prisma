@@ -1,0 +1,109 @@
+// Prisma schema — works with SQLite locally, switch DATABASE_URL to a
+// Postgres connection string for production (no code changes needed).
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // change to "postgresql" for production
+  url      = env("DATABASE_URL")
+}
+
+model Property {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  description String
+  address     String
+  city        String
+  state       String
+  country     String   @default("US")
+  maxGuests   Int
+  bedrooms    Int
+  beds        Int
+  baths       Float
+  basePrice   Int      // nightly rate, in cents
+  cleaningFee Int      @default(0) // cents
+  taxRate     Float    @default(0) // e.g. 0.08 for 8%
+  minNights   Int      @default(2)
+  amenities   String   // JSON array string, e.g. ["WiFi","Kitchen","Pool"]
+  images      String   // JSON array string of image URLs, first = cover
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bookings      Booking[]
+  blockedDates  BlockedDate[]
+  priceRules    PriceRule[]
+  icalSources   IcalSource[]
+}
+
+model Booking {
+  id           String        @id @default(cuid())
+  property     Property      @relation(fields: [propertyId], references: [id])
+  propertyId   String
+  guestName    String
+  guestEmail   String
+  guestPhone   String?
+  checkIn      DateTime
+  checkOut     DateTime
+  guests       Int
+  nights       Int
+  subtotal     Int           // cents
+  cleaningFee  Int           // cents
+  taxTotal     Int           // cents
+  total        Int           // cents
+  status       String        @default("PENDING")  // PENDING, CONFIRMED, CANCELLED, COMPLETED
+  paymentType  String        @default("INQUIRY") // INQUIRY, STRIPE
+  stripeSessionId String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+// BookingStatus values: PENDING, CONFIRMED, CANCELLED, COMPLETED
+// PaymentType values: INQUIRY, STRIPE
+// Using String fields instead of enums for SQLite compatibility.
+// Switch to enums when using PostgreSQL in production.
+
+// Manually blocked dates (host closes dates, or maintenance, etc)
+model BlockedDate {
+  id         String   @id @default(cuid())
+  property   Property @relation(fields: [propertyId], references: [id])
+  propertyId String
+  date       DateTime
+  source     String   @default("manual") // "manual" or the ical source name
+  createdAt  DateTime @default(now())
+
+  @@unique([propertyId, date, source])
+}
+
+// Seasonal / date-range price overrides
+model PriceRule {
+  id         String   @id @default(cuid())
+  property   Property @relation(fields: [propertyId], references: [id])
+  propertyId String
+  startDate  DateTime
+  endDate    DateTime
+  price      Int      // cents per night for this range
+  label      String?  // e.g. "Summer peak"
+}
+
+// External calendars to import (Airbnb/VRBO .ics export URLs) so this
+// site never shows dates as available when they're booked elsewhere.
+model IcalSource {
+  id          String    @id @default(cuid())
+  property    Property  @relation(fields: [propertyId], references: [id])
+  propertyId  String
+  label       String    // e.g. "Airbnb"
+  url         String
+  lastSyncAt  DateTime?
+}
+
+model AdminSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
