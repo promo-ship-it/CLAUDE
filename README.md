@@ -139,3 +139,4 @@ prisma/schema.prisma       data model
 - Admin auth is single-user (one email/password), which fits a small owner-operated
   site; add a `User` table if multiple staff need separate logins.
 
+ 
