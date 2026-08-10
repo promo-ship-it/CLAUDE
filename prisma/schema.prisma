@@ -59,6 +59,10 @@ model Booking {
   status       BookingStatus @default(PENDING)
   paymentType  PaymentType   @default(INQUIRY)
   stripeSessionId String?
+  stripeSubscriptionId String?  // for recurring monthly payments
+  monthlyAmount    Int?         // cents per month (null = one-time payment)
+  totalPayments    Int?         // total number of monthly payments
+  proratedFinal    Int?         // cents for the final prorated payment (null if evenly divisible)
   notes        String?
   messageToken String?       @unique // token for guest to access messages without login
   createdAt    DateTime      @default(now())
@@ -92,6 +96,7 @@ enum BookingStatus {
 enum PaymentType {
   INQUIRY
   STRIPE
+  STRIPE_RECURRING  // monthly subscription payments
 }
 
 // Manually blocked dates (host closes dates, or maintenance, etc)

@@ -12,6 +12,8 @@ type Breakdown = {
   total: number;
 };
 
+const RECURRING_THRESHOLD = 30;
+
 // useSearchParams requires a Suspense boundary in Next 14's App Router,
 // or the production build fails — this wrapper provides it.
 export default function BookPage({ params }: { params: { slug: string } }) {
@@ -32,8 +34,22 @@ function BookPageInner({ params }: { params: { slug: string } }) {
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
+  const [authorizeRecurring, setAuthorizeRecurring] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isRecurring = breakdown && breakdown.nights >= RECURRING_THRESHOLD;
+
+  // Calculate recurring payment details client-side for display
+  const recurringDetails = isRecurring && breakdown ? (() => {
+    const avgNightlyRate = breakdown.subtotal / breakdown.nights;
+    const monthlyRate = Math.round(avgNightlyRate * 30);
+    const fullMonths = Math.floor(breakdown.nights / 30);
+    const proratedNights = breakdown.nights % 30;
+    const totalPayments = proratedNights > 0 ? fullMonths + 1 : fullMonths;
+    const proratedAmount = proratedNights > 0 ? Math.round(avgNightlyRate * proratedNights) : 0;
+    return { monthlyRate, fullMonths, proratedNights, totalPayments, proratedAmount };
+  })() : null;
 
   useEffect(() => {
     if (!checkIn || !checkOut) {
@@ -53,8 +69,6 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           setBreakdown(data.breakdown);
         }
       });
-    // Payments-enabled flag comes from env at build; a lightweight check here
-    // just tries the config endpoint indirectly via checkout attempt state.
   }, [checkIn, checkOut, params.slug, router]);
 
   useEffect(() => {
@@ -74,7 +88,14 @@ function BookPageInner({ params }: { params: { slug: string } }) {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: params.slug, checkIn, checkOut, guests, ...form })
+        body: JSON.stringify({
+          slug: params.slug,
+          checkIn,
+          checkOut,
+          guests,
+          ...form,
+          ...(isRecurring && paymentsEnabled ? { authorizeRecurring } : {})
+        })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -96,7 +117,11 @@ function BookPageInner({ params }: { params: { slug: string } }) {
   return (
     <div className="max-w-2xl mx-auto px-6 py-16">
       <p className="label-eyebrow mb-3">
-        {paymentsEnabled ? "Confirm and pay" : "Request to book"}
+        {paymentsEnabled
+          ? isRecurring
+            ? "Monthly payment plan"
+            : "Confirm and pay"
+          : "Request to book"}
       </p>
       <h1 className="text-3xl mb-8">Just a few details</h1>
 
@@ -108,10 +133,80 @@ function BookPageInner({ params }: { params: { slug: string } }) {
               {guests > 1 ? "s" : ""}
             </span>
           </div>
-          <div className="flex justify-between pt-3 rule mt-3 font-semibold">
-            <span>Total</span>
-            <span>{formatCents(breakdown.total)}</span>
-          </div>
+
+          {isRecurring && recurringDetails && paymentsEnabled ? (
+            <>
+              <div className="mt-3 pt-3 rule space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-ink/60">Monthly payment</span>
+                  <span>{formatCents(recurringDetails.monthlyRate)}/month</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ink/60">Full months</span>
+                  <span>{recurringDetails.fullMonths} × {formatCents(recurringDetails.monthlyRate)}</span>
+                </div>
+                {recurringDetails.proratedNights > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-ink/60">Final month ({recurringDetails.proratedNights} nights, prorated)</span>
+                    <span>{formatCents(recurringDetails.proratedAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-ink/60">Cleaning fee (first payment)</span>
+                  <span>{formatCents(breakdown.cleaningFee)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ink/60">Taxes (total)</span>
+                  <span>{formatCents(breakdown.taxTotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ink/60">Total payments</span>
+                  <span>{recurringDetails.totalPayments} payments</span>
+                </div>
+              </div>
+              <div className="flex justify-between pt-3 rule mt-3 font-semibold">
+                <span>Grand total</span>
+                <span>{formatCents(breakdown.total)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between pt-3 rule mt-3 font-semibold">
+              <span>Total</span>
+              <span>{formatCents(breakdown.total)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recurring payment authorization notice */}
+      {isRecurring && paymentsEnabled && recurringDetails && (
+        <div className="bg-sand border border-line rounded-card p-4 mb-8">
+          <p className="text-sm font-medium text-ink mb-2">Recurring payment authorization</p>
+          <p className="text-xs text-ink/70 leading-relaxed mb-4">
+            By checking the box below, you authorize automatic monthly charges of{" "}
+            <strong>{formatCents(recurringDetails.monthlyRate)}</strong> to your payment method
+            for <strong>{recurringDetails.totalPayments} months</strong> beginning today.
+            {recurringDetails.proratedNights > 0 && (
+              <> The final payment will be prorated to{" "}
+              <strong>{formatCents(recurringDetails.proratedAmount)}</strong> for the remaining{" "}
+              {recurringDetails.proratedNights} nights.</>
+            )}{" "}
+            The first payment includes a one-time cleaning fee of{" "}
+            <strong>{formatCents(breakdown!.cleaningFee)}</strong>.
+            Your total obligation is <strong>{formatCents(breakdown!.total)}</strong>.
+          </p>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={authorizeRecurring}
+              onChange={(e) => setAuthorizeRecurring(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-line"
+            />
+            <span className="text-sm text-ink">
+              I authorize recurring monthly payments of {formatCents(recurringDetails.monthlyRate)} for
+              the duration of my stay ({recurringDetails.totalPayments} payments, {formatCents(breakdown!.total)} total).
+            </span>
+          </label>
         </div>
       )}
 
@@ -155,13 +250,25 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           />
         </div>
 
-        <button type="submit" disabled={submitting || !breakdown} className="btn-primary w-full mt-4">
+        <button
+          type="submit"
+          disabled={submitting || !breakdown || (!!isRecurring && paymentsEnabled && !authorizeRecurring)}
+          className="btn-primary w-full mt-4"
+        >
           {submitting
             ? "Please wait…"
             : paymentsEnabled
-              ? `Pay ${breakdown ? formatCents(breakdown.total) : ""} and book`
+              ? isRecurring
+                ? `Authorize ${recurringDetails ? formatCents(recurringDetails.monthlyRate) : ""}/month and book`
+                : `Pay ${breakdown ? formatCents(breakdown.total) : ""} and book`
               : "Send request to book"}
         </button>
+
+        {isRecurring && paymentsEnabled && !authorizeRecurring && (
+          <p className="text-xs text-brick text-center pt-2">
+            You must check the authorization box above to proceed with monthly payments.
+          </p>
+        )}
 
         {!paymentsEnabled && (
           <p className="text-xs text-ink/50 text-center pt-2">
