@@ -1,4 +1,4 @@
-# Direct Booking Site
+# Direct Booking Site 
 
 A production-ready direct-booking website for 2–10 vacation rental properties —
 public listing pages, a real-time availability + pricing engine, a booking flow
