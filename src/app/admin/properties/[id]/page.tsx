@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import PropertyForm from "@/components/PropertyForm";
+import DeletePropertyButton from "@/components/DeletePropertyButton";
 import {
   updateProperty,
   deleteProperty,
@@ -249,11 +250,7 @@ export default async function EditPropertyPage({ params }: { params: { id: strin
 
       <div className="rule mt-12 pt-10 pb-16">
         <h2 className="text-xl mb-4 text-brick">Danger zone</h2>
-        <form action={deleteWithId}>
-          <button className="btn-secondary border-brick text-brick hover:bg-brick hover:text-paper text-sm">
-            Delete this property permanently
-          </button>
-        </form>
+        <DeletePropertyButton action={deleteWithId} />
       </div>
     </div>
   );
