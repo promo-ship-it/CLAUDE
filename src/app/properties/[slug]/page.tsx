@@ -3,6 +3,7 @@ import { formatCents } from "@/lib/pricing";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import BookingWidget from "@/components/BookingWidget";
+import PropertyCalendar from "@/components/PropertyCalendar";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,15 @@ export default async function PropertyPage({ params }: { params: { slug: string 
                 <div key={a}>— {a}</div>
               ))}
             </div>
+          </div>
+
+          <div className="py-8 rule">
+            <h2 className="text-xl mb-4">Availability</h2>
+            <PropertyCalendar
+              propertySlug={property.slug}
+              minNights={property.minNights}
+              maxGuests={property.maxGuests}
+            />
           </div>
         </div>
 
