@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { calculatePrice, isRangeAvailable, nightsCount } from "./pricing";
+import { randomBytes } from "crypto";
 
 export type GuestInfo = {
   name: string;
@@ -57,7 +58,8 @@ export async function createPendingBooking(
       taxTotal: breakdown.taxTotal,
       total: breakdown.total,
       paymentType,
-      status: "PENDING"
+      status: "PENDING",
+      messageToken: randomBytes(24).toString("hex")
     }
   });
 

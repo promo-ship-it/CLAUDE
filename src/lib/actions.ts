@@ -166,3 +166,35 @@ export async function logoutAction() {
   await clearAdminSession();
   redirect("/admin/login");
 }
+
+export async function toggleSmartPricing(propertyId: string, formData: FormData) {
+  const enabled = formData.get("enabled") === "true";
+  await prisma.property.update({
+    where: { id: propertyId },
+    data: { smartPricingEnabled: enabled }
+  });
+  revalidatePath(`/admin/properties/${propertyId}`);
+}
+
+export async function addSmartPricingRule(propertyId: string, formData: FormData) {
+  const ruleType = String(formData.get("ruleType"));
+  const threshold = String(formData.get("threshold") || "");
+  const adjustment = Number(formData.get("adjustment") || 0);
+
+  if (!ruleType || adjustment === 0) return;
+
+  await prisma.smartPricingRule.create({
+    data: {
+      propertyId,
+      ruleType: ruleType as any,
+      threshold: threshold || null,
+      adjustment
+    }
+  });
+  revalidatePath(`/admin/properties/${propertyId}`);
+}
+
+export async function removeSmartPricingRule(propertyId: string, ruleId: string) {
+  await prisma.smartPricingRule.delete({ where: { id: ruleId } });
+  revalidatePath(`/admin/properties/${propertyId}`);
+}

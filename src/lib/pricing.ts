@@ -79,18 +79,32 @@ export async function calculatePrice(
   checkIn: Date,
   checkOut: Date
 ): Promise<PriceBreakdown> {
+  const { getSmartPriceAdjustment, applyAdjustment } = await import("./smart-pricing");
+
   const property = await prisma.property.findUniqueOrThrow({ where: { id: propertyId } });
   const rules = await prisma.priceRule.findMany({ where: { propertyId } });
 
   const nights = nightsBetween(checkIn, checkOut);
-  const nightlyRates = nights.map((night) => {
+
+  // Calculate nightly rates with smart pricing adjustments
+  const nightlyRates: number[] = [];
+  for (const night of nights) {
+    // First determine base/seasonal rate
     const rule = rules.find(
       (r) =>
         (isBefore(r.startDate, night) || isEqual(startOfDay(r.startDate), night)) &&
         isBefore(night, r.endDate)
     );
-    return rule ? rule.price : property.basePrice;
-  });
+    let rate = rule ? rule.price : property.basePrice;
+
+    // Apply smart pricing adjustment if enabled
+    const { totalAdjustment } = await getSmartPriceAdjustment(propertyId, night);
+    if (totalAdjustment !== 0) {
+      rate = applyAdjustment(rate, totalAdjustment);
+    }
+
+    nightlyRates.push(rate);
+  }
 
   const subtotal = nightlyRates.reduce((sum, n) => sum + n, 0);
   const cleaningFee = property.cleaningFee;

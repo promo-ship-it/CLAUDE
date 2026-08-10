@@ -30,6 +30,7 @@ model Property {
   amenities   String   // JSON array string, e.g. ["WiFi","Kitchen","Pool"]
   images      String   // JSON array string of image URLs, first = cover
   active      Boolean  @default(true)
+  smartPricingEnabled Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -37,6 +38,7 @@ model Property {
   blockedDates  BlockedDate[]
   priceRules    PriceRule[]
   icalSources   IcalSource[]
+  smartPricing  SmartPricingRule[]
 }
 
 model Booking {
@@ -58,8 +60,26 @@ model Booking {
   paymentType  PaymentType   @default(INQUIRY)
   stripeSessionId String?
   notes        String?
+  messageToken String?       @unique // token for guest to access messages without login
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+
+  messages     Message[]
+}
+
+// Messages between host and guest for a specific booking
+model Message {
+  id        String      @id @default(cuid())
+  booking   Booking     @relation(fields: [bookingId], references: [id])
+  bookingId String
+  sender    MessageSender
+  text      String
+  createdAt DateTime    @default(now())
+}
+
+enum MessageSender {
+  GUEST
+  HOST
 }
 
 enum BookingStatus {
@@ -113,4 +133,28 @@ model AdminSession {
   token     String   @unique
   createdAt DateTime @default(now())
   expiresAt DateTime
+}
+
+// Smart pricing rules — dynamic adjustments based on demand signals
+model SmartPricingRule {
+  id         String            @id @default(cuid())
+  property   Property          @relation(fields: [propertyId], references: [id])
+  propertyId String
+  ruleType   SmartPricingType
+  // Day-of-week: "0,5,6" for Sun,Fri,Sat — comma-separated day numbers
+  // Last-minute: days before check-in threshold
+  // Far-out: days before check-in threshold
+  // Occupancy: percentage threshold (e.g. 80 = when 80%+ of month is booked)
+  threshold  String?
+  adjustment Int              // percentage adjustment, e.g. 20 = +20%, -15 = -15%
+  active     Boolean          @default(true)
+  createdAt  DateTime         @default(now())
+}
+
+enum SmartPricingType {
+  DAY_OF_WEEK     // weekend/weekday pricing
+  LAST_MINUTE     // discount when close to check-in and still unbooked
+  FAR_OUT         // discount for bookings far in advance
+  HIGH_DEMAND     // increase when occupancy is high for that period
+  LOW_DEMAND      // decrease when occupancy is low
 }

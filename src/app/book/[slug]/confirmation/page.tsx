@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { formatCents } from "@/lib/pricing";
 import { format } from "date-fns";
 import Link from "next/link";
+import GuestMessages from "@/components/GuestMessages";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,10 @@ export default async function ConfirmationPage({
           <span>{formatCents(booking.total)}</span>
         </div>
       </div>
+
+      {booking.messageToken && (
+        <GuestMessages bookingId={booking.id} messageToken={booking.messageToken} />
+      )}
 
       <Link href="/" className="btn-secondary mt-10 inline-flex">
         Back to all stays
