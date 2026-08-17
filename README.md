@@ -1,5 +1,6 @@
 # Direct Booking Site 
 
+
 A production-ready direct-booking website for 2–10 vacation rental properties —
 public listing pages, a real-time availability + pricing engine, a booking flow
 (inquiry-only or Stripe checkout), iCal sync with Airbnb/VRBO, and an admin
