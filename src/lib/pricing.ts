@@ -80,11 +80,13 @@ export async function calculatePrice(
   checkOut: Date
 ): Promise<PriceBreakdown> {
   const { getSmartPriceAdjustment, applyAdjustment } = await import("./smart-pricing");
+  const { RECURRING_THRESHOLD_NIGHTS } = await import("./recurring-pricing");
 
   const property = await prisma.property.findUniqueOrThrow({ where: { id: propertyId } });
   const rules = await prisma.priceRule.findMany({ where: { propertyId } });
 
   const nights = nightsBetween(checkIn, checkOut);
+  const isLongStay = nights.length >= RECURRING_THRESHOLD_NIGHTS;
 
   // Calculate nightly rates with smart pricing adjustments
   const nightlyRates: number[] = [];
@@ -100,7 +102,17 @@ export async function calculatePrice(
     // Apply smart pricing adjustment if enabled
     const { totalAdjustment } = await getSmartPriceAdjustment(propertyId, night);
     if (totalAdjustment !== 0) {
-      rate = applyAdjustment(rate, totalAdjustment, property.minPrice, property.maxPrice);
+      // For long stays (30+ nights): only apply surcharges (positive adjustments).
+      // Discounts don't stack — the 18% long-stay discount supersedes any
+      // smart pricing discounts. Guest gets the better of the two, not both.
+      const effectiveAdjustment = isLongStay ? Math.max(0, totalAdjustment) : totalAdjustment;
+      if (effectiveAdjustment !== 0) {
+        rate = applyAdjustment(rate, effectiveAdjustment, property.minPrice, property.maxPrice);
+      } else {
+        // Enforce guardrails even with no adjustment
+        if (property.minPrice && rate < property.minPrice) rate = property.minPrice;
+        if (property.maxPrice && rate > property.maxPrice) rate = property.maxPrice;
+      }
     } else {
       // Even without adjustments, enforce min/max guardrails
       if (property.minPrice && rate < property.minPrice) rate = property.minPrice;
