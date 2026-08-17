@@ -55,5 +55,19 @@ export async function POST(req: NextRequest) {
   }
 
   const breakdown = await calculatePrice(property.id, inDate, outDate);
-  return NextResponse.json({ available: true, breakdown });
+
+  // Calculate average nightly rate for display
+  const avgNightlyRate = Math.round(breakdown.subtotal / breakdown.nights);
+
+  return NextResponse.json({
+    available: true,
+    breakdown,
+    details: {
+      basePrice: property.basePrice,
+      avgNightlyRate,
+      minPrice: property.minPrice,
+      maxPrice: property.maxPrice,
+      smartPricingEnabled: property.smartPricingEnabled
+    }
+  });
 }

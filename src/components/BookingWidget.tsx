@@ -10,6 +10,15 @@ type Breakdown = {
   cleaningFee: number;
   taxTotal: number;
   total: number;
+  nightlyRates: number[];
+};
+
+type PriceDetails = {
+  basePrice: number;
+  avgNightlyRate: number;
+  minPrice: number | null;
+  maxPrice: number | null;
+  smartPricingEnabled: boolean;
 };
 
 export default function BookingWidget({
@@ -26,11 +35,13 @@ export default function BookingWidget({
   const [checkOut, setCheckOut] = useState("");
   const [guests, setGuests] = useState(1);
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null);
+  const [details, setDetails] = useState<PriceDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     setBreakdown(null);
+    setDetails(null);
     setError(null);
     if (!checkIn || !checkOut) return;
     if (checkOut <= checkIn) return;
@@ -50,6 +61,7 @@ export default function BookingWidget({
           setError("Some of those dates are already booked. Try a different range.");
         } else {
           setBreakdown(data.breakdown);
+          setDetails(data.details || null);
         }
       } catch {
         setError("Couldn't check availability. Try again.");
@@ -119,12 +131,47 @@ export default function BookingWidget({
 
       {breakdown && !error && (
         <div className="text-sm mb-4 space-y-1 font-mono">
-          <div className="flex justify-between">
-            <span className="text-ink/60">
-              {formatCents(breakdown.subtotal / breakdown.nights)} × {breakdown.nights} nights
-            </span>
-            <span>{formatCents(breakdown.subtotal)}</span>
-          </div>
+          {/* Show if smart pricing adjusted the rate */}
+          {details?.smartPricingEnabled && details.basePrice !== details.avgNightlyRate && (
+            <div className="flex justify-between text-ink/40 text-xs mb-1">
+              <span className="line-through">Base rate: {formatCents(details.basePrice)}/night</span>
+              <span className="text-sage">Smart pricing applied</span>
+            </div>
+          )}
+
+          {/* Show per-night rate breakdown if rates vary */}
+          {breakdown.nightlyRates && new Set(breakdown.nightlyRates).size > 1 ? (
+            <>
+              <p className="text-[11px] text-ink/40 mb-1">Nightly rates vary:</p>
+              {Object.entries(
+                breakdown.nightlyRates.reduce((acc: Record<number, number>, rate: number) => {
+                  acc[rate] = (acc[rate] || 0) + 1;
+                  return acc;
+                }, {})
+              ).map(([rateStr, count]) => {
+                const rate = Number(rateStr);
+                const nights = count as number;
+                return (
+                  <div key={rateStr} className="flex justify-between text-ink/60">
+                    <span>{formatCents(rate)} × {nights} night{nights > 1 ? "s" : ""}</span>
+                    <span>{formatCents(rate * nights)}</span>
+                  </div>
+                );
+              })}
+              <div className="flex justify-between pt-1">
+                <span className="text-ink/60">Subtotal ({breakdown.nights} nights)</span>
+                <span>{formatCents(breakdown.subtotal)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between">
+              <span className="text-ink/60">
+                {formatCents(breakdown.subtotal / breakdown.nights)} × {breakdown.nights} nights
+              </span>
+              <span>{formatCents(breakdown.subtotal)}</span>
+            </div>
+          )}
+
           {breakdown.cleaningFee > 0 && (
             <div className="flex justify-between text-ink/60">
               <span>Cleaning fee</span>
@@ -133,7 +180,7 @@ export default function BookingWidget({
           )}
           {breakdown.taxTotal > 0 && (
             <div className="flex justify-between text-ink/60">
-              <span>Taxes</span>
+              <span>Taxes &amp; fees</span>
               <span>{formatCents(breakdown.taxTotal)}</span>
             </div>
           )}
@@ -141,6 +188,13 @@ export default function BookingWidget({
             <span>Total</span>
             <span>{formatCents(breakdown.total)}</span>
           </div>
+
+          {/* Long-stay discount notice */}
+          {breakdown.nights >= 30 && (
+            <div className="pt-2 text-xs text-sage">
+              18% long-stay discount will be applied at checkout
+            </div>
+          )}
         </div>
       )}
 
