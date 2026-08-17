@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     await prisma.property.update({
       where: { id: property.id },
       data: {
-        basePrice: 10000, // $100/night
+        basePrice: 9000, // $90/night
         minPrice: 7500,   // $75/night floor
         maxPrice: 18000,  // $180/night ceiling
         smartPricingEnabled: true
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
     success: true,
     message: `Smart pricing configured for ${properties.length} properties`,
     settings: {
-      baseRate: "$100/night",
+      baseRate: "$90/night",
       floor: "$75/night",
       ceiling: "$180/night",
       rules: [

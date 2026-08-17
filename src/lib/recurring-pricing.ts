@@ -1,6 +1,7 @@
 import { PriceBreakdown } from "./pricing";
 
 export const RECURRING_THRESHOLD_NIGHTS = 30;
+export const LONG_STAY_DISCOUNT_PERCENT = 18; // 18% discount for stays 30+ nights
 
 export type RecurringBreakdown = {
   isRecurring: true;
@@ -38,15 +39,20 @@ export function calculatePaymentPlan(breakdown: PriceBreakdown): PaymentPlan {
     return { isRecurring: false, breakdown };
   }
 
-  const { nights, subtotal, cleaningFee, taxTotal } = breakdown;
+  // Apply long-stay discount to subtotal
+  const discountMultiplier = 1 - (LONG_STAY_DISCOUNT_PERCENT / 100);
+  const discountedSubtotal = Math.round(breakdown.subtotal * discountMultiplier);
+  const { nights, cleaningFee } = breakdown;
+  // Recalculate tax on discounted amount
+  const taxTotal = Math.round((discountedSubtotal + cleaningFee) * (breakdown.taxTotal / (breakdown.subtotal + cleaningFee)));
 
   // Calculate full months and remaining nights
   const fullMonths = Math.floor(nights / 30);
   const proratedNights = nights % 30;
   const totalPayments = proratedNights > 0 ? fullMonths + 1 : fullMonths;
 
-  // Monthly rate based on average nightly rate × 30
-  const avgNightlyRate = subtotal / nights;
+  // Monthly rate based on discounted average nightly rate × 30
+  const avgNightlyRate = discountedSubtotal / nights;
   const monthlyRate = Math.round(avgNightlyRate * 30);
 
   // Prorated amount for the final partial month
@@ -55,7 +61,7 @@ export function calculatePaymentPlan(breakdown: PriceBreakdown): PaymentPlan {
     : 0;
 
   // Tax distributed per payment proportionally
-  const taxPerFullMonth = Math.round((taxTotal * monthlyRate) / subtotal);
+  const taxPerFullMonth = Math.round((taxTotal * monthlyRate) / discountedSubtotal);
   const taxForProrated = proratedNights > 0
     ? taxTotal - (taxPerFullMonth * fullMonths)
     : 0;
@@ -63,8 +69,8 @@ export function calculatePaymentPlan(breakdown: PriceBreakdown): PaymentPlan {
   // First payment includes cleaning fee + first month + proportional tax
   const firstPayment = monthlyRate + cleaningFee + taxPerFullMonth;
 
-  // Total = subtotal + cleaning fee + tax (same as one-time, just split differently)
-  const totalAmount = subtotal + cleaningFee + taxTotal;
+  // Total = discounted subtotal + cleaning fee + tax
+  const totalAmount = discountedSubtotal + cleaningFee + taxTotal;
 
   return {
     isRecurring: true,

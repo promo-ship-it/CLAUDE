@@ -13,6 +13,7 @@ type Breakdown = {
 };
 
 const RECURRING_THRESHOLD = 30;
+const LONG_STAY_DISCOUNT = 18; // percent
 
 // useSearchParams requires a Suspense boundary in Next 14's App Router,
 // or the production build fails — this wrapper provides it.
@@ -42,13 +43,17 @@ function BookPageInner({ params }: { params: { slug: string } }) {
 
   // Calculate recurring payment details client-side for display
   const recurringDetails = isRecurring && breakdown ? (() => {
-    const avgNightlyRate = breakdown.subtotal / breakdown.nights;
+    const discountMultiplier = 1 - (LONG_STAY_DISCOUNT / 100);
+    const discountedSubtotal = Math.round(breakdown.subtotal * discountMultiplier);
+    const savings = breakdown.subtotal - discountedSubtotal;
+    const avgNightlyRate = discountedSubtotal / breakdown.nights;
     const monthlyRate = Math.round(avgNightlyRate * 30);
     const fullMonths = Math.floor(breakdown.nights / 30);
     const proratedNights = breakdown.nights % 30;
     const totalPayments = proratedNights > 0 ? fullMonths + 1 : fullMonths;
     const proratedAmount = proratedNights > 0 ? Math.round(avgNightlyRate * proratedNights) : 0;
-    return { monthlyRate, fullMonths, proratedNights, totalPayments, proratedAmount };
+    const discountedTotal = discountedSubtotal + breakdown.cleaningFee + Math.round(breakdown.taxTotal * discountMultiplier);
+    return { monthlyRate, fullMonths, proratedNights, totalPayments, proratedAmount, savings, discountedTotal };
   })() : null;
 
   useEffect(() => {
@@ -137,6 +142,10 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           {isRecurring && recurringDetails && paymentsEnabled ? (
             <>
               <div className="mt-3 pt-3 rule space-y-2">
+                <div className="flex justify-between text-sage font-semibold">
+                  <span>Long stay discount ({LONG_STAY_DISCOUNT}% off)</span>
+                  <span>−{formatCents(recurringDetails.savings)}</span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-ink/60">Monthly payment</span>
                   <span>{formatCents(recurringDetails.monthlyRate)}/month</span>
@@ -164,9 +173,13 @@ function BookPageInner({ params }: { params: { slug: string } }) {
                   <span>{recurringDetails.totalPayments} payments</span>
                 </div>
               </div>
-              <div className="flex justify-between pt-3 rule mt-3 font-semibold">
+              <div className="flex justify-between pt-3 rule mt-3">
+                <span className="text-ink/40 line-through">Without discount</span>
+                <span className="text-ink/40 line-through">{formatCents(breakdown.total)}</span>
+              </div>
+              <div className="flex justify-between pt-1 font-semibold">
                 <span>Grand total</span>
-                <span>{formatCents(breakdown.total)}</span>
+                <span>{formatCents(recurringDetails.discountedTotal)}</span>
               </div>
             </>
           ) : (
