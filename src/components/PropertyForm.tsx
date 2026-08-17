@@ -129,15 +129,37 @@ export default function PropertyForm({
         </Field>
       </div>
 
-      <Field label="Minimum nights">
-        <input
-          type="number"
-          name="minNights"
-          min={1}
-          defaultValue={property?.minNights || 2}
-          className="input w-32"
-        />
-      </Field>
+      <div className="grid grid-cols-3 gap-4">
+        <Field label="Min price / night (USD)">
+          <input
+            type="number"
+            step="0.01"
+            name="minPrice"
+            placeholder="Price floor"
+            defaultValue={property?.minPrice ? property.minPrice / 100 : ""}
+            className="input"
+          />
+        </Field>
+        <Field label="Max price / night (USD)">
+          <input
+            type="number"
+            step="0.01"
+            name="maxPrice"
+            placeholder="Price ceiling"
+            defaultValue={property?.maxPrice ? property.maxPrice / 100 : ""}
+            className="input"
+          />
+        </Field>
+        <Field label="Minimum nights">
+          <input
+            type="number"
+            name="minNights"
+            min={1}
+            defaultValue={property?.minNights || 2}
+            className="input"
+          />
+        </Field>
+      </div>
 
       <Field label="Amenities (comma-separated)">
         <input name="amenities" defaultValue={amenities.join(", ")} className="input" />

@@ -35,6 +35,8 @@ export async function createProperty(formData: FormData) {
       cleaningFee: Math.round(Number(formData.get("cleaningFee") || 0) * 100),
       taxRate: Number(formData.get("taxRate") || 0) / 100,
       minNights: Number(formData.get("minNights") || 2),
+      minPrice: formData.get("minPrice") ? Math.round(Number(formData.get("minPrice")) * 100) : null,
+      maxPrice: formData.get("maxPrice") ? Math.round(Number(formData.get("maxPrice")) * 100) : null,
       amenities: JSON.stringify(
         String(formData.get("amenities") || "")
           .split(",")
@@ -74,6 +76,8 @@ export async function updateProperty(propertyId: string, formData: FormData) {
       cleaningFee: Math.round(Number(formData.get("cleaningFee") || 0) * 100),
       taxRate: Number(formData.get("taxRate") || 0) / 100,
       minNights: Number(formData.get("minNights") || 2),
+      minPrice: formData.get("minPrice") ? Math.round(Number(formData.get("minPrice")) * 100) : null,
+      maxPrice: formData.get("maxPrice") ? Math.round(Number(formData.get("maxPrice")) * 100) : null,
       active: formData.get("active") === "on",
       amenities: JSON.stringify(
         String(formData.get("amenities") || "")

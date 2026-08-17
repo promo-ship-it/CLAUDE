@@ -27,6 +27,8 @@ model Property {
   cleaningFee Int      @default(0) // cents
   taxRate     Float    @default(0) // e.g. 0.08 for 8%
   minNights   Int      @default(2)
+  minPrice    Int?     // cents — smart pricing floor (never charge less than this per night)
+  maxPrice    Int?     // cents — smart pricing ceiling (never charge more than this per night)
   amenities   String   // JSON array string, e.g. ["WiFi","Kitchen","Pool"]
   images      String   // JSON array string of image URLs, first = cover
   active      Boolean  @default(true)

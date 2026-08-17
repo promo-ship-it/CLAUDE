@@ -142,10 +142,22 @@ async function getMonthOccupancy(propertyId: string, night: Date): Promise<numbe
 
 /**
  * Apply smart pricing adjustment to a base rate (in cents).
+ * Enforces min/max price guardrails if provided.
  * Returns the adjusted rate.
  */
-export function applyAdjustment(basePriceCents: number, adjustmentPercent: number): number {
+export function applyAdjustment(
+  basePriceCents: number,
+  adjustmentPercent: number,
+  minPrice?: number | null,
+  maxPrice?: number | null
+): number {
   const adjusted = basePriceCents * (1 + adjustmentPercent / 100);
   // Round to nearest 100 cents ($1) for clean pricing
-  return Math.round(adjusted / 100) * 100;
+  let rate = Math.round(adjusted / 100) * 100;
+
+  // Enforce floor and ceiling
+  if (minPrice && rate < minPrice) rate = minPrice;
+  if (maxPrice && rate > maxPrice) rate = maxPrice;
+
+  return rate;
 }

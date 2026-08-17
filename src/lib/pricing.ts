@@ -100,7 +100,11 @@ export async function calculatePrice(
     // Apply smart pricing adjustment if enabled
     const { totalAdjustment } = await getSmartPriceAdjustment(propertyId, night);
     if (totalAdjustment !== 0) {
-      rate = applyAdjustment(rate, totalAdjustment);
+      rate = applyAdjustment(rate, totalAdjustment, property.minPrice, property.maxPrice);
+    } else {
+      // Even without adjustments, enforce min/max guardrails
+      if (property.minPrice && rate < property.minPrice) rate = property.minPrice;
+      if (property.maxPrice && rate > property.maxPrice) rate = property.maxPrice;
     }
 
     nightlyRates.push(rate);
