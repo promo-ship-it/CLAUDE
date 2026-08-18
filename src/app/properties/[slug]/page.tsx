@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { formatCents } from "@/lib/pricing";
 import { notFound } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import BookingWidget from "@/components/BookingWidget";
 import PropertyCalendar from "@/components/PropertyCalendar";
 
@@ -54,6 +55,15 @@ export default async function PropertyPage({ params }: { params: { slug: string 
                 <div key={a}>— {a}</div>
               ))}
             </div>
+          </div>
+
+          <div className="py-8 rule flex gap-6">
+            <Link href={`/properties/${property.slug}/house-rules`} className="text-sm text-brick hover:underline">
+              House Rules →
+            </Link>
+            <Link href={`/properties/${property.slug}/welcome`} className="text-sm text-brick hover:underline">
+              Local Guide →
+            </Link>
           </div>
 
           <div className="py-8 rule">

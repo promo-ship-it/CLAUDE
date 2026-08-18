@@ -31,6 +31,8 @@ model Property {
   maxPrice    Int?     // cents — smart pricing ceiling (never charge more than this per night)
   amenities   String   // JSON array string, e.g. ["WiFi","Kitchen","Pool"]
   images      String   // JSON array string of image URLs, first = cover
+  houseRules  String?  // Markdown/text — house rules for guests
+  welcomeGuide String? // Markdown/text — local tips, restaurants, entertainment
   active      Boolean  @default(true)
   smartPricingEnabled Boolean @default(false)
   createdAt   DateTime @default(now())

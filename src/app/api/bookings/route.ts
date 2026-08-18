@@ -12,7 +12,7 @@ const schema = z.object({
   guests: z.number().min(1),
   name: z.string().min(1),
   email: z.string().email(),
-  phone: z.string().optional(),
+  phone: z.string().min(1),
   notes: z.string().optional()
 });
 

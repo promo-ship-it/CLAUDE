@@ -36,6 +36,7 @@ function BookPageInner({ params }: { params: { slug: string } }) {
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
   const [authorizeRecurring, setAuthorizeRecurring] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -246,8 +247,10 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           />
         </div>
         <div>
-          <label className="block text-sm mb-1">Phone (optional)</label>
+          <label className="block text-sm mb-1">Phone</label>
           <input
+            required
+            type="tel"
             className="w-full border border-line rounded-card p-3"
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -263,9 +266,28 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           />
         </div>
 
+        {/* Terms & Conditions agreement */}
+        <div className="border border-line rounded-card p-4 mt-4">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={agreedToTerms}
+              onChange={(e) => setAgreedToTerms(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-line"
+            />
+            <span className="text-sm text-ink/70">
+              I have read and agree to the{" "}
+              <a href="/terms" target="_blank" className="text-brick hover:underline">
+                Terms & Conditions
+              </a>
+              , including the cancellation policy, house rules, and damage liability terms.
+            </span>
+          </label>
+        </div>
+
         <button
           type="submit"
-          disabled={submitting || !breakdown || (!!isRecurring && paymentsEnabled && !authorizeRecurring)}
+          disabled={submitting || !breakdown || !agreedToTerms || (!!isRecurring && paymentsEnabled && !authorizeRecurring)}
           className="btn-primary w-full mt-4"
         >
           {submitting

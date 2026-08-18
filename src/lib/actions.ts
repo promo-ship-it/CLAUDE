@@ -90,7 +90,9 @@ export async function updateProperty(propertyId: string, formData: FormData) {
           .split("\n")
           .map((a) => a.trim())
           .filter(Boolean)
-      )
+      ),
+      houseRules: String(formData.get("houseRules") || "") || null,
+      welcomeGuide: String(formData.get("welcomeGuide") || "") || null
     }
   });
 

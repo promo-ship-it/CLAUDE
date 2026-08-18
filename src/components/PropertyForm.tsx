@@ -173,6 +173,26 @@ export default function PropertyForm({
         <textarea id="images-textarea" name="images" rows={4} defaultValue={images.join("\n")} className="input" />
       </Field>
 
+      <Field label="House Rules (displayed on the property's House Rules page)">
+        <textarea
+          name="houseRules"
+          rows={6}
+          defaultValue={property?.houseRules || ""}
+          placeholder="e.g.&#10;- No smoking indoors&#10;- Quiet hours 10pm-8am&#10;- Maximum 4 guests&#10;- No shoes inside&#10;- Please take out trash on departure"
+          className="input"
+        />
+      </Field>
+
+      <Field label="Welcome Guide (local tips, restaurants, entertainment for guests)">
+        <textarea
+          name="welcomeGuide"
+          rows={8}
+          defaultValue={property?.welcomeGuide || ""}
+          placeholder="e.g.&#10;RESTAURANTS&#10;- The Mill House (2 min walk) — best coffee in town&#10;- Harbor Grill — fresh seafood, reservation recommended&#10;&#10;ACTIVITIES&#10;- Kayak rentals at the marina&#10;- Hiking: Bluff Trail (moderate, 3 miles)&#10;&#10;GROCERIES&#10;- Corner Market (5 min walk)&#10;- Whole Foods (10 min drive)"
+          className="input"
+        />
+      </Field>
+
       {!isNew && (
         <Field label="">
           <label className="flex items-center gap-2 text-sm">
