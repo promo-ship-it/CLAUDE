@@ -104,6 +104,7 @@ function score(){const o=stats(),lab=o.pc>=90?'Excellent':o.pc>=75?'Solid':o.pc>
  h+=`<div class='card'><h2>By week</h2>${weekRows(o.weeks)}</div>`;
  M.arch.slice().reverse().forEach(a=>{h+=`<details class='card'><summary><span>Plan ${a.run} · ${a.start} to ${a.end}</span><b>${a.pc}%</b></summary><div class='sc'><span>Full / partial / missed</span><b>${a.F} / ${a.P} / ${a.X}</b></div><div class='sc'><span>Strength sessions</span><b>${a.sf} of ${a.sn}</b></div><div class='sc'><span>Sets checked</span><b>${a.ss}</b></div><div class='sc'><span>Volume (lb × reps)</span><b>${a.vol.toLocaleString()}</b></div>${a.nd!=null?`<div class='sc'><span>Nutrition days on plan</span><b>${a.no} of ${a.nd} logged</b></div><div class='sc'><span>Junk servings</span><b>${a.nt.junk}</b></div>`:''}<h2 style='margin-top:10px'>Best lifts</h2>${a.best.map(b=>`<div class='sc'><span>${esc(b[0])}</span><b>${b[1][0]} lb × ${b[1][1]}</b></div>`).join('')||'<div class="sw">None logged</div>'}<h2 style='margin-top:10px'>By week</h2>${weekRows(a.weeks)}</details>`});
  h+=`<details class='card'><summary>If you miss days or cut a workout short</summary><ol><li>Can’t train: tap Skip day, add a day. That workout moves to the next date and everything after shifts by one day.</li><li>Missed one strength day: do it on the next recovery or rest day if that’s within 2 days. Never double up.</li><li>Missed 3–6 days: repeat the last week you finished once, at the same weights.</li><li>Missed 7–14 days: restart at the last week you completed with about 10% less weight.</li><li>Off 3+ weeks: restart at the first week of your current phase at about 80% of your weights.</li><li>Short on time: do the first 2–3 exercises at full sets and drop the rest. Keep a 5-minute rehab minimum (Spanish squat hold, terminal knee extension, band external rotation), then tap Mark day complete.</li><li>Flare-up: use the swap and check the set. That doesn’t count as a miss.</li></ol></details>`;
+ h+=`<div class='card'><h2>Start date</h2><p class='sw'>The date Day 1 falls on. Every day’s date is counted from here, so changing it shifts the whole calendar. Your logged sets stay attached to the same day number.</p><div class='set'><label style='gap:6px'><span>Day 1</span></label><input class='n' style='width:150px' type='date' id='sd' value='${M.starts[M.run]}'><button class='bt' id='sdt'>Start today</button></div></div>`;
  h+=`<div class='card'><h2>Reset program</h2><p class='sw'>Clears this plan’s logged sets, skipped days and exercise edits, and restarts at Day 1 today. Saved past plans are kept.</p><button class='bt' id='rst'>${armR?'Tap again to confirm reset':'Reset to Day 1'}</button></div>`;
  $('m').innerHTML=h}
 function finish(){const o=stats(),best=Object.entries(o.best).sort((a,b)=>b[1][0]-a[1][0]).slice(0,10);
@@ -122,6 +123,7 @@ function saveEd(){const n=$('e1').value.trim();if(!n)return;const base=exs(cur,E
  if(EK.ei>=0){e.sw=base[EK.ei].sw||'';base[EK.ei]=e}else base.push(e);M.edits[EK.key]=base;saveM();$('ed').hidden=true;render()}
 function delEd(){const base=exs(cur,EK.di).map(x=>Object.assign({},x));base[EK.ei].x=1;M.edits[EK.key]=base;saveM();$('ed').hidden=true;render()}
 function clearDay(di){const st=S[cur]||{};Object.keys(st).forEach(key=>{if(key.split('|')[0]===String(di))delete st[key]});saveW(cur);armC=null;render()}
+function setStart(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return;const[y,m,d]=v.split('-').map(Number),dt=new Date(y,m-1,d);if(isNaN(dt))return;M.starts[M.run]=iso(dt);saveM();render()}
 function resetPlan(){armR=false;M.slips={};M.edits={};M.starts[M.run]=iso(new Date());D.forEach(x=>{S[x.w]={};wr(docId(x.w),lsK(x.w),{})});cur=1;saveM();render()}
 function act(a,di){if(a==='edit'){const[x,y]=di.split('|');return openEd(+x,+y)}if(a==='add')return openEd(+di,-1);const key=cur+'|'+di,st=S[cur];
  if(a==='clear'){if(armC!==key){armC=key;return render()}return clearDay(+di)}
@@ -137,8 +139,9 @@ document.addEventListener('click',e=>{const t=e.target;
  if(t.id==='edx'||t.id==='ed'){$('ed').hidden=true;return}if(t.id==='eds')return saveEd();if(t.id==='edd')return delEd();
  const bt=t.closest('.bt[data-a]');if(bt)return act(bt.dataset.a,bt.dataset.k);
  if(t.id==='fin'){if(!arm){arm=true;return score()}finish()}
- if(t.id==='rst'){if(!armR){armR=true;return score()}resetPlan()}});
-document.addEventListener('input',e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k||cur===0)return;S[cur][k]=e.target.type==='checkbox'?(e.target.checked?1:0):e.target.value;saveW(cur);prog()});
+ if(t.id==='rst'){if(!armR){armR=true;return score()}resetPlan()}
+ if(t.id==='sdt')return setStart(iso(new Date()))});
+document.addEventListener('input',e=>{if(e.target.id==='sd')return setStart(e.target.value);const k=e.target.dataset&&e.target.dataset.k;if(!k||cur===0)return;S[cur][k]=e.target.type==='checkbox'?(e.target.checked?1:0):e.target.value;saveW(cur);prog()});
 (async()=>{try{if(window.claude&&claude.use){const[d,u]=await Promise.all([claude.use('db'),claude.use('user')]);if(d&&u){const id=await u.id();if(id)DB=d.collection('data/users/'+id)}}}catch(e){}
  const m=await rd('meta','fp100-meta');if(m)M=Object.assign(M,m);M.edits=M.edits||{};M.tg=Object.assign({water:8,protein:4,fat:3,carb:3,junk:0},M.tg||{});await loadAll();render()})();
 </script></body></html>
