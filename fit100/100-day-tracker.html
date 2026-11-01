@@ -118,10 +118,13 @@ function sheet(kind,key){SK=key;const v0=document.querySelector(`input[data-k='$
 let EK=null;
 function openEd(di,ei){EK={key:cur+'|'+di,di,ei};const e=ei>=0?exs(cur,di)[ei]:{n:'',s:3,r:'10',k:'s',nt:''};
  $('e1').value=e.n;$('e2').value=e.s;$('e3').value=e.r;$('e4').value=e.k;$('e5').value=e.nt||'';$('edd').style.display=ei>=0?'':'none';$('edt').textContent=ei>=0?'Edit exercise':'Add exercise';$('ed').hidden=false}
+function rekeyDay(di,fromEi,delta){const st=S[cur]||{},moves=[];Object.keys(st).forEach(key=>{const p=key.split('|');if(p[0]===String(di)&&p.length===4&&/^\d+$/.test(p[1])){const ei=+p[1];if(ei>=fromEi)moves.push([key,di+'|'+(ei+delta)+'|'+p[2]+'|'+p[3]])}});
+ if(delta>0)moves.sort((a,b)=>b[1].localeCompare(a[1]));else moves.sort((a,b)=>a[1].localeCompare(b[1]));
+ moves.forEach(([o,nkey])=>{st[nkey]=st[o];delete st[o]})}
 function saveEd(){const n=$('e1').value.trim();if(!n)return;const base=exs(cur,EK.di).map(x=>Object.assign({},x));
  const e={n,s:Math.max(1,Math.min(10,parseInt($('e2').value)||1)),r:$('e3').value.trim()||'-',sw:'',k:$('e4').value,nt:$('e5').value.trim()};
- if(EK.ei>=0){e.sw=base[EK.ei].sw||'';base[EK.ei]=e}else base.push(e);M.edits[EK.key]=base;saveM();$('ed').hidden=true;render()}
-function delEd(){const base=exs(cur,EK.di).map(x=>Object.assign({},x));base[EK.ei].x=1;M.edits[EK.key]=base;saveM();$('ed').hidden=true;render()}
+ if(EK.ei>=0){e.sw=base[EK.ei].sw||'';base[EK.ei]=e}else{rekeyDay(EK.di,0,1);base.unshift(e)}M.edits[EK.key]=base;saveW(cur);saveM();$('ed').hidden=true;render()}
+function delEd(){const base=exs(cur,EK.di).map(x=>Object.assign({},x));const ei=EK.ei;Object.keys(S[cur]||{}).forEach(key=>{const p=key.split('|');if(p[0]===String(EK.di)&&p[1]===String(ei)&&p.length===4)delete S[cur][key]});rekeyDay(EK.di,ei+1,-1);base.splice(ei,1);M.edits[EK.key]=base;saveW(cur);saveM();$('ed').hidden=true;render()}
 function clearDay(di){const st=S[cur]||{};Object.keys(st).forEach(key=>{if(key.split('|')[0]===String(di))delete st[key]});saveW(cur);armC=null;render()}
 function setStart(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return;const[y,m,d]=v.split('-').map(Number),dt=new Date(y,m-1,d);if(isNaN(dt))return;M.starts[M.run]=iso(dt);saveM();render()}
 function resetPlan(){armR=false;M.slips={};M.edits={};M.starts[M.run]=iso(new Date());D.forEach(x=>{S[x.w]={};wr(docId(x.w),lsK(x.w),{})});cur=1;saveM();render()}
