@@ -49,7 +49,7 @@ const D=[{"w": 1, "name": "Foundation", "sr": "Phase 1 · 2 sets × 10 reps", "r
 {"w": 15, "name": "Retest", "sr": "Days 99–100 · compare with your Day 1 baseline (write numbers in the boxes)", "rehab": ["Spanish squat hold 5 × 40 s", "Terminal knee extension 3 × 15/leg", "Side-lying leg raise 2 × 15/side", "Clamshell (band) 2 × 15/side", "Single-leg calf raise 3 × 10, 3 s lowering", "Tibialis raise 2 × 15", "Band external rotation 2 × 15/arm", "Wall slide 2 × 10", "Prone Y raise 2 × 10", "Vacuum breaths 3 × 10 s"], "rsw": "Swaps: Spanish squat → shallow wall sit · Wall slide → low wall slide · Prone Y → prone T", "days": [{"label": "Day 99 · Tue Jan 26", "name": "Measurements", "ex": [{"n": "Waist at navel (in)", "s": 1, "r": "in", "sw": "", "k": "v"}, {"n": "Waist at narrowest point (in)", "s": 1, "r": "in", "sw": "", "k": "v"}, {"n": "Hips at widest point (in)", "s": 1, "r": "in", "sw": "", "k": "v"}, {"n": "Front and side photos", "s": 1, "r": "done", "sw": "", "k": "c"}, {"n": "Light walk", "s": 1, "r": "20 min", "sw": "", "k": "c"}]}, {"label": "Day 100 · Wed Jan 27", "name": "Strength retest", "ex": [{"n": "Single-leg calf raises, left", "s": 1, "r": "reps", "sw": "", "k": "v"}, {"n": "Single-leg calf raises, right", "s": 1, "r": "reps", "sw": "", "k": "v"}, {"n": "Side plank hold, left (sec)", "s": 1, "r": "sec", "sw": "", "k": "v"}, {"n": "Side plank hold, right (sec)", "s": 1, "r": "sec", "sw": "", "k": "v"}, {"n": "Deepest pain-free box squat (box height)", "s": 1, "r": "in", "sw": "", "k": "v"}, {"n": "5-rep goblet squat weight", "s": 1, "r": "lb", "sw": "", "k": "v"}]}]}];
 const $=i=>document.getElementById(i);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let DB=null,S={},M={run:1,starts:{1:'2026-10-20'},slips:{},edits:{},tg:{water:8,protein:4,fat:3,carb:3,junk:0},arch:[]},cur=1,tm={},arm=false,armR=false,armC=null,SK=null;
+let DB=null,S={},M={run:1,starts:{1:'2026-10-20'},slips:{},edits:{},tg:{water:8,protein:4,fat:3,carb:3,junk:0},arch:[]},cur=1,tm={},arm=false,armR=false,armC=null,selMode=null,selEx=new Set(),SK=null;
 const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const fmt=d=>d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
 const docId=w=>M.run===1?'w'+w:'r'+M.run+'w'+w,lsK=w=>M.run===1?'fp100-w'+w:'fp100-r'+M.run+'-w'+w;
@@ -86,9 +86,10 @@ function render(){tabs();tot();if(cur===0)return score();const wk=D[cur-1],st=S[
  const yt=n=>'https://www.youtube.com/results?search_query='+encodeURIComponent(n.replace(/\(.*\)/,'')+' exercise');
  let h=`<div class='card'><h2>Week ${wk.w} · ${esc(wk.name)}</h2><div class='mut'>${esc(wk.sr)}</div><details><summary>Daily Rehab Block</summary><ol>${wk.rehab.map(r=>`<li>${esc(r)}</li>`).join('')}</ol><div class='sw'>${esc(wk.rsw)}</div></details></div>`;
  wk.days.forEach((d,di)=>{const n=(cur-1)*7+di+1,sl=M.slips[cur+'|'+di]||0,k=di+'|rehab';
-  h+=`<details class='day' ${di===0?'open':''}><summary><span>Day ${n} · ${fmt(dOf(n,c))} · ${esc(d.name)}</span><b></b></summary><div class='acts'><button class='bt' data-a='slip' data-k='${di}'>Skip day, add a day</button>${sl?`<button class='bt' data-a='unslip' data-k='${di}'>Undo skip (${sl})</button>`:''}<button class='bt' data-a='add' data-k='${di}'>+ Add exercise</button><button class='bt' data-a='done' data-k='${di}'>${st[di+'|done']?'Unmark complete':'Mark day complete'}</button><button class='bt danger' data-a='clear' data-k='${di}'>${armC===cur+'|'+di?'Tap again to clear':'Clear day'}</button></div>
+  h+=`<details class='day' ${di===0?'open':''}><summary><span>Day ${n} · ${fmt(dOf(n,c))} · ${esc(d.name)}</span><b></b></summary><div class='acts'><button class='bt' data-a='slip' data-k='${di}'>Skip day, add a day</button>${sl?`<button class='bt' data-a='unslip' data-k='${di}'>Undo skip (${sl})</button>`:''}<button class='bt' data-a='add' data-k='${di}'>+ Add exercise</button><button class='bt' data-a='done' data-k='${di}'>${st[di+'|done']?'Unmark complete':'Mark day complete'}</button><button class='bt danger' data-a='clear' data-k='${di}'>${armC===cur+'|'+di?'Tap again to clear':'Clear day'}</button>${selMode===cur+'|'+di?'':`<button class='bt' data-a='sel' data-k='${di}'>Select to delete</button>`}</div>
+  ${selMode===cur+'|'+di?`<div class='acts'><button class='bt danger' data-a='delsel' data-k='${di}'>${armC==='delsel|'+cur+'|'+di?'Tap again to delete ('+selEx.size+')':'Delete selected ('+selEx.size+')'}</button><button class='bt' data-a='selcancel' data-k='${di}'>Cancel</button></div>`:''}
   <label class='row'><input type='checkbox' data-k='${k}' ${st[k]?'checked':''}><span>Daily Rehab Block (12 min)</span></label>`;
-  exs(cur,di).forEach((e,ei)=>{if(e.x)return;h+=`<div class='ex'><div><span class='nm'>${esc(e.n)}</span><button class='bt' style='height:28px;margin-left:8px' data-a='edit' data-k='${di}|${ei}'>Edit</button><a href='${yt(e.n)}' target='_blank' rel='noopener'>▶</a></div><div class='tg'>${e.k==='v'?'Enter your number':e.s+' × '+esc(e.r)}</div>${bl(e)}${e.sw?`<div class='sw'>${esc(e.sw)}</div>`:''}${e.nt?`<div class='sw'>${esc(e.nt)}</div>`:''}`;
+  exs(cur,di).forEach((e,ei)=>{if(e.x)return;const selm=selMode===cur+'|'+di;h+=`<div class='ex'><div>${selm?`<input type='checkbox' data-a='seltog' data-k='${di}|${ei}' ${selEx.has(ei)?'checked':''} style='margin-right:8px'>`:''}<span class='nm'>${esc(e.n)}</span>${selm?'':`<button class='bt' style='height:28px;margin-left:8px' data-a='edit' data-k='${di}|${ei}'>Edit</button>`}<a href='${yt(e.n)}' target='_blank' rel='noopener'>▶</a></div><div class='tg'>${e.k==='v'?'Enter your number':e.s+' × '+esc(e.r)}</div>${bl(e)}${e.sw?`<div class='sw'>${esc(e.sw)}</div>`:''}${e.nt?`<div class='sw'>${esc(e.nt)}</div>`:''}`;
    for(let i=0;i<e.s;i++){const b=`${di}|${ei}|${i}`;
     h+=`<div class='set'><label><input type='checkbox' data-k='${b}|c' ${st[b+'|c']?'checked':''}><span>${e.k!=='s'?(e.s>1?'Set '+(i+1):'Done'):'Set '+(i+1)}</span></label>`+(e.k==='s'?`<input class='n' inputmode='decimal' placeholder='lb' data-k='${b}|w' value='${esc(st[b+'|w']||'')}'><button class='pk' data-p='w' data-k='${b}|w'>▾</button><input class='n' inputmode='numeric' placeholder='reps' data-k='${b}|r' value='${esc(st[b+'|r']||'')}'><button class='pk' data-p='r' data-k='${b}|r'>▾</button>`:e.k==='v'?`<input class='n' inputmode='decimal' placeholder='${esc(e.r)}' data-k='${b}|w' value='${esc(st[b+'|w']||'')}'>`:'')+`</div>`}
    h+=`</div>`});h+=nutBlock(cur,di)+`</details>`});
@@ -124,27 +125,35 @@ function rekeyDay(di,fromEi,delta){const st=S[cur]||{},moves=[];Object.keys(st).
 function saveEd(){const n=$('e1').value.trim();if(!n)return;const base=exs(cur,EK.di).map(x=>Object.assign({},x));
  const e={n,s:Math.max(1,Math.min(10,parseInt($('e2').value)||1)),r:$('e3').value.trim()||'-',sw:'',k:$('e4').value,nt:$('e5').value.trim()};
  if(EK.ei>=0){e.sw=base[EK.ei].sw||'';base[EK.ei]=e}else{rekeyDay(EK.di,0,1);base.unshift(e)}M.edits[EK.key]=base;saveW(cur);saveM();$('ed').hidden=true;render()}
-function delEd(){const base=exs(cur,EK.di).map(x=>Object.assign({},x));const ei=EK.ei;Object.keys(S[cur]||{}).forEach(key=>{const p=key.split('|');if(p[0]===String(EK.di)&&p[1]===String(ei)&&p.length===4)delete S[cur][key]});rekeyDay(EK.di,ei+1,-1);base.splice(ei,1);M.edits[EK.key]=base;saveW(cur);saveM();$('ed').hidden=true;render()}
+function delOne(di,ei){Object.keys(S[cur]||{}).forEach(key=>{const p=key.split('|');if(p[0]===String(di)&&p[1]===String(ei)&&p.length===4)delete S[cur][key]});rekeyDay(di,ei+1,-1)}
+function delEd(){const base=exs(cur,EK.di).map(x=>Object.assign({},x));const ei=EK.ei;delOne(EK.di,ei);base.splice(ei,1);M.edits[EK.key]=base;saveW(cur);saveM();$('ed').hidden=true;render()}
+function delMulti(di){const base=exs(cur,di).map(x=>Object.assign({},x));const idx=[...selEx].filter(i=>i<base.length).sort((a,b)=>b-a);if(!idx.length){selMode=null;selEx=new Set();return render()}idx.forEach(ei=>{delOne(di,ei);base.splice(ei,1)});M.edits[cur+'|'+di]=base;saveW(cur);saveM();selMode=null;selEx=new Set();armC=null;render()}
 function clearDay(di){const st=S[cur]||{};Object.keys(st).forEach(key=>{if(key.split('|')[0]===String(di))delete st[key]});saveW(cur);armC=null;render()}
 function setStart(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return;const[y,m,d]=v.split('-').map(Number),dt=new Date(y,m-1,d);if(isNaN(dt))return;M.starts[M.run]=iso(dt);saveM();render()}
 function resetPlan(){armR=false;M.slips={};M.edits={};M.starts[M.run]=iso(new Date());D.forEach(x=>{S[x.w]={};wr(docId(x.w),lsK(x.w),{})});cur=1;saveM();render()}
-function act(a,di){if(a==='edit'){const[x,y]=di.split('|');return openEd(+x,+y)}if(a==='add')return openEd(+di,-1);const key=cur+'|'+di,st=S[cur];
+function act(a,di){if(a==='edit'){const[x,y]=di.split('|');return openEd(+x,+y)}if(a==='add')return openEd(+di,-1);
+ if(a==='sel'){selMode=cur+'|'+di;selEx=new Set();armC=null;return render()}
+ if(a==='selcancel'){selMode=null;selEx=new Set();armC=null;return render()}
+ if(a==='seltog'){const[x,y]=di.split('|'),ei=+y;if(selEx.has(ei))selEx.delete(ei);else selEx.add(ei);armC=null;return render()}
+ if(a==='delsel'){const kk='delsel|'+cur+'|'+di;if(!selEx.size){selMode=null;return render()}if(armC!==kk){armC=kk;return render()}return delMulti(+di)}
+ const key=cur+'|'+di,st=S[cur];
  if(a==='clear'){if(armC!==key){armC=key;return render()}return clearDay(+di)}
  if(a==='slip')M.slips[key]=(M.slips[key]||0)+1;
  else if(a==='unslip'){M.slips[key]=Math.max(0,(M.slips[key]||0)-1);if(!M.slips[key])delete M.slips[key]}
  else{st[di+'|done']=st[di+'|done']?0:1;saveW(cur)}
  armC=null;saveM();render()}
 document.addEventListener('click',e=>{const t=e.target;
- const tb=t.closest('#tabs button');if(tb){cur=+tb.dataset.w;arm=false;armR=false;armC=null;scrollTo(0,0);return render()}
+ const tb=t.closest('#tabs button');if(tb){cur=+tb.dataset.w;arm=false;armR=false;armC=null;selMode=null;selEx=new Set();scrollTo(0,0);return render()}
  const nb=t.closest('[data-a=nut]');if(nb)return nut(nb.dataset.k);const tb2=t.closest('[data-a=tg]');if(tb2)return tg(tb2.dataset.k);const pk=t.closest('.pk[data-p]');if(pk)return sheet(pk.dataset.p,pk.dataset.k);
  const op=t.closest('#lst button');if(op){const i=document.querySelector(`input[data-k='${SK}']`);i.value=op.dataset.v;S[cur][SK]=op.dataset.v;saveW(cur);$('sh').hidden=true;return prog()}
  if(t.id==='shx'||t.id==='sh'){$('sh').hidden=true;return}
  if(t.id==='edx'||t.id==='ed'){$('ed').hidden=true;return}if(t.id==='eds')return saveEd();if(t.id==='edd')return delEd();
+ const sx=t.closest('input[data-a=seltog]');if(sx)return act('seltog',sx.dataset.k);
  const bt=t.closest('.bt[data-a]');if(bt)return act(bt.dataset.a,bt.dataset.k);
  if(t.id==='fin'){if(!arm){arm=true;return score()}finish()}
  if(t.id==='rst'){if(!armR){armR=true;return score()}resetPlan()}
  if(t.id==='sdt')return setStart(iso(new Date()))});
-document.addEventListener('input',e=>{if(e.target.id==='sd')return setStart(e.target.value);const k=e.target.dataset&&e.target.dataset.k;if(!k||cur===0)return;S[cur][k]=e.target.type==='checkbox'?(e.target.checked?1:0):e.target.value;saveW(cur);prog()});
+document.addEventListener('input',e=>{if(e.target.id==='sd')return setStart(e.target.value);if(e.target.dataset&&e.target.dataset.a)return;const k=e.target.dataset&&e.target.dataset.k;if(!k||cur===0)return;S[cur][k]=e.target.type==='checkbox'?(e.target.checked?1:0):e.target.value;saveW(cur);prog()});
 (async()=>{try{if(window.claude&&claude.use){const[d,u]=await Promise.all([claude.use('db'),claude.use('user')]);if(d&&u){const id=await u.id();if(id)DB=d.collection('data/users/'+id)}}}catch(e){}
  const m=await rd('meta','fp100-meta');if(m)M=Object.assign(M,m);M.edits=M.edits||{};M.tg=Object.assign({water:8,protein:4,fat:3,carb:3,junk:0},M.tg||{});await loadAll();render()})();
 </script></body></html>
