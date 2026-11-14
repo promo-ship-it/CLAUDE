@@ -1,18 +1,20 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
+import { getSessionSecret } from "./session-secret";
 
-const COOKIE_NAME = "admin_session";
-const secretKey = () => new TextEncoder().encode(process.env.SESSION_SECRET || "dev-secret-change-me");
+export const COOKIE_NAME = "admin_session";
 
 export async function createAdminSession() {
+  const secret = getSessionSecret();
+  if (!secret) throw new Error("SESSION_SECRET is not configured");
   const token = await new SignJWT({ role: "admin" })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(secretKey());
+    .sign(secret);
 
-  cookies().set(COOKIE_NAME, token, {
+  (await cookies()).set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -22,17 +24,29 @@ export async function createAdminSession() {
 }
 
 export async function clearAdminSession() {
-  cookies().delete(COOKIE_NAME);
+  (await cookies()).delete(COOKIE_NAME);
 }
 
 export async function isAdminAuthed(): Promise<boolean> {
-  const token = cookies().get(COOKIE_NAME)?.value;
-  if (!token) return false;
+  const token = (await cookies()).get(COOKIE_NAME)?.value;
+  const secret = getSessionSecret();
+  if (!token || !secret) return false;
   try {
-    await jwtVerify(token, secretKey());
+    await jwtVerify(token, secret);
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Second line of defense for admin pages (the first is src/middleware.ts).
+ * Call at the top of every admin server page.
+ */
+export async function requireAdminPage() {
+  if (!(await isAdminAuthed())) {
+    const { redirect } = await import("next/navigation");
+    redirect("/admin/login");
   }
 }
 

@@ -1,11 +1,12 @@
-// Prisma schema — works with SQLite locally, switch DATABASE_URL to a
-// Postgres connection string for production (no code changes needed).
+// Prisma schema — PostgreSQL in every environment (local, preview, production).
+// Schema changes ship as SQL files in prisma/migrations and are applied by
+// `npm run db:migrate` (which `npm run build` runs automatically).
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql" // sqlite for local dev, postgresql for production (Vercel/Neon)
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -64,15 +65,65 @@ model Booking {
   paymentType  PaymentType   @default(INQUIRY)
   stripeSessionId String?
   stripeSubscriptionId String?  // for recurring monthly payments
-  monthlyAmount    Int?         // cents per month (null = one-time payment)
+  stripePaymentIntentId String? // one-time payments (used for refunds)
+  monthlyAmount    Int?         // cents charged per full month, incl. tax (null = one-time payment)
   totalPayments    Int?         // total number of monthly payments
-  proratedFinal    Int?         // cents for the final prorated payment (null if evenly divisible)
+  proratedFinal    Int?         // cents for the final prorated payment, incl. tax (null if none)
+  paymentSchedule  String?      // JSON [{label, amount}] — exactly what the guest agreed to
+
+  // Cancellation policy the guest chose/agreed to at booking time
+  cancellationPolicy CancellationPolicy @default(MODERATE)
+  discountAmount   Int          @default(0) // cents off the nightly subtotal (non-refundable / long-stay)
+  discountLabel    String?
+  termsVersion     String?      // version of /terms the guest accepted
+  termsAcceptedAt  DateTime?
+
+  // Cancellation outcome
+  cancelledAt      DateTime?
+  cancelledBy      String?      // "GUEST" | "HOST"
+  refundAmount     Int?         // cents refunded to the guest
+  cancellationNote String?
+
   notes        String?
-  messageToken String?       @unique // token for guest to access messages without login
+  messageToken String?       @unique // token for guest to access messages/manage booking without login
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
   messages     Message[]
+  payments     Payment[]
+}
+
+// Every successful charge for a booking (one-time payment, each monthly
+// installment, or a cancellation shortfall). stripeRef is the Stripe invoice
+// id (subscriptions) or payment intent id (one-time) — unique, so webhook
+// retries never double-count a payment.
+model Payment {
+  id                    String   @id @default(cuid())
+  booking               Booking  @relation(fields: [bookingId], references: [id])
+  bookingId             String
+  stripeRef             String   @unique
+  stripePaymentIntentId String?
+  kind                  String   // "ONE_TIME" | "INSTALLMENT" | "SHORTFALL"
+  amount                Int      // cents
+  refundedAmount        Int      @default(0)
+  paidAt                DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+enum CancellationPolicy {
+  MODERATE        // stays < 30 nights, standard rate
+  NON_REFUNDABLE  // stays < 30 nights, discounted rate, no refund after 24h grace
+  LONG_TERM_FIRM  // stays >= 30 nights, monthly billing
+}
+
+// Failed admin login attempts, used for rate limiting.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
 }
 
 // Messages between host and guest for a specific booking

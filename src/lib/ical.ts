@@ -1,7 +1,7 @@
 import ICAL from "ical.js";
 import { createEvents, type EventAttributes } from "ics";
 import { prisma } from "./prisma";
-import { nightsBetween } from "./pricing";
+import { activeBookingWhere, nightsBetween } from "./pricing";
 
 /**
  * Build an .ics feed of booked/blocked dates for one property, so it can
@@ -10,7 +10,7 @@ import { nightsBetween } from "./pricing";
 export async function buildIcalFeed(propertyId: string): Promise<string> {
   const [bookings, blocked, property] = await Promise.all([
     prisma.booking.findMany({
-      where: { propertyId, status: { in: ["PENDING", "CONFIRMED"] } }
+      where: { propertyId, ...activeBookingWhere() }
     }),
     prisma.blockedDate.findMany({ where: { propertyId } }),
     prisma.property.findUniqueOrThrow({ where: { id: propertyId } })

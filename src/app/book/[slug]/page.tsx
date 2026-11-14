@@ -1,61 +1,39 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { formatCents } from "@/lib/format";
-
-type Breakdown = {
-  nights: number;
-  subtotal: number;
-  cleaningFee: number;
-  taxTotal: number;
-  total: number;
-};
-
-const RECURRING_THRESHOLD = 30;
-const LONG_STAY_DISCOUNT = 18; // percent
+import type { Quote, QuoteSet } from "@/lib/quote";
+import { POLICY_NAMES, POLICY_SUMMARIES } from "@/lib/policy";
+import PriceBreakdown from "@/components/PriceBreakdown";
 
 // useSearchParams requires a Suspense boundary in Next 14's App Router,
 // or the production build fails — this wrapper provides it.
-export default function BookPage({ params }: { params: { slug: string } }) {
+export default function BookPage() {
   return (
     <Suspense fallback={<div className="max-w-2xl mx-auto px-6 py-16">Loading…</div>}>
-      <BookPageInner params={params} />
+      <BookPageInner />
     </Suspense>
   );
 }
 
-function BookPageInner({ params }: { params: { slug: string } }) {
+function BookPageInner() {
+  const params = useParams<{ slug: string }>();
   const router = useRouter();
   const search = useSearchParams();
   const checkIn = search.get("checkIn") || "";
   const checkOut = search.get("checkOut") || "";
   const guests = Number(search.get("guests") || 1);
 
-  const [breakdown, setBreakdown] = useState<Breakdown | null>(null);
+  const [quotes, setQuotes] = useState<QuoteSet | null>(null);
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [plan, setPlan] = useState<"STANDARD" | "NON_REFUNDABLE">("STANDARD");
   const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
-  const [authorizeRecurring, setAuthorizeRecurring] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [acceptedNonRefundable, setAcceptedNonRefundable] = useState(false);
+  const [authorizeRecurring, setAuthorizeRecurring] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isRecurring = breakdown && breakdown.nights >= RECURRING_THRESHOLD;
-
-  // Calculate recurring payment details client-side for display
-  const recurringDetails = isRecurring && breakdown ? (() => {
-    const discountMultiplier = 1 - (LONG_STAY_DISCOUNT / 100);
-    const discountedSubtotal = Math.round(breakdown.subtotal * discountMultiplier);
-    const savings = breakdown.subtotal - discountedSubtotal;
-    const avgNightlyRate = discountedSubtotal / breakdown.nights;
-    const monthlyRate = Math.round(avgNightlyRate * 30);
-    const fullMonths = Math.floor(breakdown.nights / 30);
-    const proratedNights = breakdown.nights % 30;
-    const totalPayments = proratedNights > 0 ? fullMonths + 1 : fullMonths;
-    const proratedAmount = proratedNights > 0 ? Math.round(avgNightlyRate * proratedNights) : 0;
-    const discountedTotal = discountedSubtotal + breakdown.cleaningFee + Math.round(breakdown.taxTotal * discountMultiplier);
-    return { monthlyRate, fullMonths, proratedNights, totalPayments, proratedAmount, savings, discountedTotal };
-  })() : null;
 
   useEffect(() => {
     if (!checkIn || !checkOut) {
@@ -70,22 +48,34 @@ function BookPageInner({ params }: { params: { slug: string } }) {
       .then((r) => r.json())
       .then((data) => {
         if (data.available === false || data.error) {
-          setError("Those dates are no longer available. Please choose new dates.");
+          setError(data.error || "Those dates are no longer available. Please choose new dates.");
         } else {
-          setBreakdown(data.breakdown);
+          setQuotes(data.quotes);
+          setPaymentsEnabled(Boolean(data.paymentsEnabled));
         }
-      });
+      })
+      .catch(() => setError("Couldn't load pricing. Please refresh."));
   }, [checkIn, checkOut, params.slug, router]);
 
-  useEffect(() => {
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((d) => setPaymentsEnabled(d.paymentsEnabled))
-      .catch(() => setPaymentsEnabled(false));
-  }, []);
+  const selected: Quote | null = quotes
+    ? plan === "NON_REFUNDABLE" && quotes.nonRefundable
+      ? quotes.nonRefundable
+      : quotes.standard
+    : null;
+  const isLongStay = Boolean(quotes?.isLongStay);
+  const isNonRefundable = selected?.plan === "NON_REFUNDABLE";
+  const needsRecurringAuth = isLongStay && paymentsEnabled && (selected?.monthly?.totalPayments ?? 1) > 1;
+
+  const canSubmit =
+    !!selected &&
+    !submitting &&
+    agreedToTerms &&
+    (!isNonRefundable || acceptedNonRefundable) &&
+    (!needsRecurringAuth || authorizeRecurring);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
 
@@ -100,7 +90,10 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           checkOut,
           guests,
           ...form,
-          ...(isRecurring && paymentsEnabled ? { authorizeRecurring } : {})
+          plan: isNonRefundable ? "NON_REFUNDABLE" : "STANDARD",
+          acceptedTerms: agreedToTerms,
+          acceptedNonRefundable: isNonRefundable ? acceptedNonRefundable : undefined,
+          authorizeRecurring: isLongStay ? authorizeRecurring || !needsRecurringAuth : undefined
         })
       });
       const data = await res.json();
@@ -109,119 +102,76 @@ function BookPageInner({ params }: { params: { slug: string } }) {
         setSubmitting(false);
         return;
       }
-      if (paymentsEnabled && data.url) {
-        window.location.href = data.url;
-      } else {
-        router.push(`/book/${params.slug}/confirmation?bookingId=${data.bookingId}`);
-      }
+      if (data.url) window.location.href = data.url;
+      else router.push(data.redirect || `/book/${params.slug}/confirmation?bookingId=${data.bookingId}`);
     } catch {
       setError("Something went wrong. Please try again.");
       setSubmitting(false);
     }
   };
 
+  const buttonLabel = () => {
+    if (submitting) return "Please wait…";
+    if (!selected) return "Loading…";
+    if (!paymentsEnabled) return "Send request to book";
+    if (selected.schedule) return `Pay ${formatCents(selected.schedule[0].amount)} today and book`;
+    return `Pay ${formatCents(selected.total)} and book`;
+  };
+
   return (
     <div className="max-w-2xl mx-auto px-6 py-16">
       <p className="label-eyebrow mb-3">
-        {paymentsEnabled
-          ? isRecurring
-            ? "Monthly payment plan"
-            : "Confirm and pay"
-          : "Request to book"}
+        {!paymentsEnabled ? "Request to book" : isLongStay ? "Monthly payment plan" : "Confirm and pay"}
       </p>
       <h1 className="text-3xl mb-8">Just a few details</h1>
 
-      {breakdown && (
-        <div className="ledger-card p-5 mb-8 font-mono text-sm">
-          <div className="flex justify-between mb-1">
-            <span className="text-ink/60">
-              {checkIn} → {checkOut} · {breakdown.nights} nights · {guests} guest
-              {guests > 1 ? "s" : ""}
-            </span>
+      {quotes && selected && (
+        <>
+          <p className="text-sm text-ink/60 font-mono mb-3">
+            {checkIn} → {checkOut} · {selected.nights} nights · {guests} guest{guests > 1 ? "s" : ""}
+          </p>
+
+          {/* Rate choice (stays under 30 nights, online payment only) */}
+          {!isLongStay && quotes.nonRefundable && (
+            <fieldset className="grid sm:grid-cols-2 gap-3 mb-6">
+              <legend className="text-sm mb-2">Choose your rate</legend>
+              {[
+                { key: "STANDARD" as const, q: quotes.standard, title: "Standard rate", sub: "Free cancellation until 5 days before check-in" },
+                {
+                  key: "NON_REFUNDABLE" as const,
+                  q: quotes.nonRefundable,
+                  title: `Non-refundable — save ${formatCents(quotes.standard.total - quotes.nonRefundable.total)}`,
+                  sub: "No refund after 24 hours"
+                }
+              ].map((o) => (
+                <label
+                  key={o.key}
+                  className={`ledger-card p-4 cursor-pointer ${plan === o.key ? "border-ink ring-1 ring-ink" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="plan"
+                    className="sr-only"
+                    checked={plan === o.key}
+                    onChange={() => setPlan(o.key)}
+                  />
+                  <span className="block text-sm font-medium">{o.title}</span>
+                  <span className="block font-mono text-lg mt-1">{formatCents(o.q.total)}</span>
+                  <span className="block text-xs text-ink/50 mt-1">{o.sub}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+
+          <div className="ledger-card p-5 mb-4">
+            <PriceBreakdown quote={selected} />
           </div>
 
-          {isRecurring && recurringDetails && paymentsEnabled ? (
-            <>
-              <div className="mt-3 pt-3 rule space-y-2">
-                <div className="flex justify-between text-sage font-semibold">
-                  <span>Long stay discount ({LONG_STAY_DISCOUNT}% off)</span>
-                  <span>−{formatCents(recurringDetails.savings)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink/60">Monthly payment</span>
-                  <span>{formatCents(recurringDetails.monthlyRate)}/month</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink/60">Full months</span>
-                  <span>{recurringDetails.fullMonths} × {formatCents(recurringDetails.monthlyRate)}</span>
-                </div>
-                {recurringDetails.proratedNights > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-ink/60">Final month ({recurringDetails.proratedNights} nights, prorated)</span>
-                    <span>{formatCents(recurringDetails.proratedAmount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-ink/60">Cleaning fee (first payment)</span>
-                  <span>{formatCents(breakdown.cleaningFee)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink/60">Taxes (total)</span>
-                  <span>{formatCents(breakdown.taxTotal)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-ink/60">Total payments</span>
-                  <span>{recurringDetails.totalPayments} payments</span>
-                </div>
-              </div>
-              <div className="flex justify-between pt-3 rule mt-3">
-                <span className="text-ink/40 line-through">Without discount</span>
-                <span className="text-ink/40 line-through">{formatCents(breakdown.total)}</span>
-              </div>
-              <div className="flex justify-between pt-1 font-semibold">
-                <span>Grand total</span>
-                <span>{formatCents(recurringDetails.discountedTotal)}</span>
-              </div>
-            </>
-          ) : (
-            <div className="flex justify-between pt-3 rule mt-3 font-semibold">
-              <span>Total</span>
-              <span>{formatCents(breakdown.total)}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Recurring payment authorization notice */}
-      {isRecurring && paymentsEnabled && recurringDetails && (
-        <div className="bg-sand border border-line rounded-card p-4 mb-8">
-          <p className="text-sm font-medium text-ink mb-2">Recurring payment authorization</p>
-          <p className="text-xs text-ink/70 leading-relaxed mb-4">
-            By checking the box below, you authorize automatic monthly charges of{" "}
-            <strong>{formatCents(recurringDetails.monthlyRate)}</strong> to your payment method
-            for <strong>{recurringDetails.totalPayments} months</strong> beginning today.
-            {recurringDetails.proratedNights > 0 && (
-              <> The final payment will be prorated to{" "}
-              <strong>{formatCents(recurringDetails.proratedAmount)}</strong> for the remaining{" "}
-              {recurringDetails.proratedNights} nights.</>
-            )}{" "}
-            The first payment includes a one-time cleaning fee of{" "}
-            <strong>{formatCents(breakdown!.cleaningFee)}</strong>.
-            Your total obligation is <strong>{formatCents(breakdown!.total)}</strong>.
-          </p>
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={authorizeRecurring}
-              onChange={(e) => setAuthorizeRecurring(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded border-line"
-            />
-            <span className="text-sm text-ink">
-              I authorize recurring monthly payments of {formatCents(recurringDetails.monthlyRate)} for
-              the duration of my stay ({recurringDetails.totalPayments} payments, {formatCents(breakdown!.total)} total).
-            </span>
-          </label>
-        </div>
+          <div className="text-xs text-ink/60 mb-8 leading-relaxed">
+            <span className="font-medium text-ink">Cancellation policy — {POLICY_NAMES[selected.plan]}:</span>{" "}
+            {POLICY_SUMMARIES[selected.plan]}
+          </div>
+        </>
       )}
 
       {error && <p className="text-brick text-sm mb-6">{error}</p>}
@@ -251,6 +201,7 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           <input
             required
             type="tel"
+            minLength={7}
             className="w-full border border-line rounded-card p-3"
             value={form.phone}
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -266,8 +217,48 @@ function BookPageInner({ params }: { params: { slug: string } }) {
           />
         </div>
 
+        {/* Monthly billing authorization (long stays) */}
+        {needsRecurringAuth && selected?.schedule && (
+          <div className="bg-sand border border-line rounded-card p-4">
+            <p className="text-sm font-medium mb-2">Recurring payment authorization</p>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={authorizeRecurring}
+                onChange={(e) => setAuthorizeRecurring(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-line"
+              />
+              <span className="text-sm text-ink/80">
+                I authorize {formatCents(selected.schedule[0].amount)} to be charged today and{" "}
+                {selected.schedule.length - 1} further automatic payment{selected.schedule.length - 1 === 1 ? "" : "s"} to the
+                same card on the dates shown in the payment schedule above ({formatCents(selected.total)} total). Billing stops
+                automatically after the last payment.
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Non-refundable acknowledgement */}
+        {isNonRefundable && (
+          <div className="bg-sand border border-line rounded-card p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedNonRefundable}
+                onChange={(e) => setAcceptedNonRefundable(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded border-line"
+              />
+              <span className="text-sm text-ink/80">
+                I understand this rate is <strong>non-refundable</strong>. I can cancel for a full refund only within 24 hours
+                of booking (and only if check-in is at least 7 days away). After that, the full{" "}
+                {selected ? formatCents(selected.total) : ""} — including the cleaning fee and taxes — is not refunded.
+              </span>
+            </label>
+          </div>
+        )}
+
         {/* Terms & Conditions agreement */}
-        <div className="border border-line rounded-card p-4 mt-4">
+        <div className="border border-line rounded-card p-4">
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -278,32 +269,16 @@ function BookPageInner({ params }: { params: { slug: string } }) {
             <span className="text-sm text-ink/70">
               I have read and agree to the{" "}
               <a href="/terms" target="_blank" className="text-brick hover:underline">
-                Terms & Conditions
+                Terms &amp; Conditions
               </a>
               , including the cancellation policy, house rules, and damage liability terms.
             </span>
           </label>
         </div>
 
-        <button
-          type="submit"
-          disabled={submitting || !breakdown || !agreedToTerms || (!!isRecurring && paymentsEnabled && !authorizeRecurring)}
-          className="btn-primary w-full mt-4"
-        >
-          {submitting
-            ? "Please wait…"
-            : paymentsEnabled
-              ? isRecurring
-                ? `Authorize ${recurringDetails ? formatCents(recurringDetails.monthlyRate) : ""}/month and book`
-                : `Pay ${breakdown ? formatCents(breakdown.total) : ""} and book`
-              : "Send request to book"}
+        <button type="submit" disabled={!canSubmit} className="btn-primary w-full mt-2">
+          {buttonLabel()}
         </button>
-
-        {isRecurring && paymentsEnabled && !authorizeRecurring && (
-          <p className="text-xs text-brick text-center pt-2">
-            You must check the authorization box above to proceed with monthly payments.
-          </p>
-        )}
 
         {!paymentsEnabled && (
           <p className="text-xs text-ink/50 text-center pt-2">

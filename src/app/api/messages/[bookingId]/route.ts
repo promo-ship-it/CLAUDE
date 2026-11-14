@@ -5,7 +5,8 @@ import { z } from "zod";
 
 // GET /api/messages/[bookingId]?token=xxx — get messages for a booking
 // Accessible by admin (via cookie) or guest (via messageToken query param)
-export async function GET(req: NextRequest, { params }: { params: { bookingId: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ bookingId: string }> }) {
+  const params = await props.params;
   const authorized = await authorizeAccess(req, params.bookingId);
   if (!authorized) {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
@@ -25,7 +26,8 @@ const postSchema = z.object({
 });
 
 // POST /api/messages/[bookingId] — send a message
-export async function POST(req: NextRequest, { params }: { params: { bookingId: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ bookingId: string }> }) {
+  const params = await props.params;
   const authorized = await authorizeAccess(req, params.bookingId);
   if (!authorized) {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });

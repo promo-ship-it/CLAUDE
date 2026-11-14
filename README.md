@@ -1,142 +1,104 @@
-# Direct Booking Site 
+# Direct Booking Site
 
+A direct-booking website for a small vacation-rental business (built for 2–10
+properties, no hard limit). Guests book and pay on your own site — no platform
+fees. Includes listing pages, a live availability + smart-pricing engine,
+Stripe payments (one-time and monthly), enforced cancellation policies with
+automatic refunds, guest–host messaging, Airbnb/VRBO calendar sync, and an
+admin dashboard.
 
-A production-ready direct-booking website for 2–10 vacation rental properties —
-public listing pages, a real-time availability + pricing engine, a booking flow
-(inquiry-only or Stripe checkout), iCal sync with Airbnb/VRBO, and an admin
-dashboard to manage everything. No booking-platform fees.
+> **Handing this to another developer or AI tool?** Start with [`HANDOVER.md`](./HANDOVER.md).
 
 ## Stack
-- **Next.js 14** (App Router, TypeScript, Server Actions)
-- **Prisma** — SQLite for local dev, swap one env var for Postgres in production
+- **Next.js 15** (App Router, TypeScript, Server Actions) with React 18
+- **PostgreSQL** via **Prisma** (Neon / Supabase / any Postgres)
 - **Tailwind CSS**
-- **Stripe** (optional — off by default, site runs in "Request to Book" mode until you add keys)
-- **Resend** (optional — emails log to console until you add a key)
+- **Stripe** — optional; without keys the site runs in "Request to Book" mode
+- **Resend** — optional; without a key, emails are written to the server log
+- **Vercel Blob** — optional, for photo uploads (pasted image URLs always work)
 
-## 1. Local setup
+## Features
+| Area | What it does |
+|---|---|
+| Listings | Property pages with photos, amenities, house rules page, local guide page |
+| Availability | Live date checks; visual calendar; abandoned checkouts release dates after ~35 min; simultaneous bookings can't double-book |
+| Pricing | Base rate → seasonal overrides → smart pricing (weekend, last-minute, far-out, high/low demand) → floor/ceiling |
+| Rate plans | **Moderate** (default), **Non-refundable** (10% off, stays < 30 nights), **Long stay** (18% off, 30+ nights, billed monthly) |
+| Payments | Stripe Checkout; long stays charge payment 1 at booking then bill monthly from 30 days after check-in, final month prorated |
+| Cancellations | Guest self-cancel from their booking link, or host cancel from admin; refund calculated by policy and issued through Stripe |
+| Messaging | Guest ↔ host chat per booking |
+| Calendar sync | iCal export per property + import Airbnb/VRBO calendars ("Sync now") |
+| Admin | Properties, bookings, calendar, smart pricing, one-click pricing setup, Stripe setup guide |
+| Emails | Booking received/confirmed (with a private "manage booking" link), cancellations, failed-payment alerts |
+
+All money amounts are computed in one place (`src/lib/quote.ts`) — what the
+guest sees is exactly what Stripe charges. All policy numbers live in
+`src/lib/policy.ts`; the Terms page and the refund calculator both read from it.
+
+## Local setup
+
+Requires Node 20+ and a PostgreSQL database (a free Neon database works fine for development).
 
 ```bash
 npm install
-cp .env.example .env
-npx prisma db push       # creates dev.db (SQLite) from the schema
-npm run db:seed          # adds 2 sample properties so you can see the site
+cp .env.example .env          # fill in DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD_HASH, SESSION_SECRET
+npm run db:migrate            # creates/updates tables
+npm run db:seed               # optional: 2 sample properties
 npm run dev
 ```
 
-Visit `http://localhost:3000` for the public site.
+- Public site: `http://localhost:3000`
+- Admin: `http://localhost:3000/admin/login`
+- Password hash: `node scripts/hash-password.js "your-password"`
+- Session secret: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 
-### Admin dashboard
+## Deploying
+See [`DEPLOY.md`](./DEPLOY.md). `npm run build` applies database migrations
+automatically (`scripts/migrate.mjs`), so deploying is just: set the
+environment variables, deploy. Runs on Vercel or any Node host
+(`npm run build && npm start`).
 
-Generate a password hash and put it in `.env`:
+## Database changes
+Edit `prisma/schema.prisma`, then create a migration and commit it:
 
 ```bash
-node scripts/hash-password.js "your-chosen-password"
-# copy the printed ADMIN_PASSWORD_HASH into .env
+npm run db:migrate:new -- --name describe_change   # writes prisma/migrations/<timestamp>_describe_change
 ```
 
-Also set `ADMIN_EMAIL` and a long random `SESSION_SECRET` in `.env`. Then visit
-`http://localhost:3000/admin/login`.
+Never use `prisma db push` against production.
 
-From the admin dashboard you can:
-- Add/edit/unpublish/delete properties (2–10, no hard limit in the code)
-- Set nightly rate, cleaning fee, tax rate, minimum nights, amenities, photos
-- Manually block dates (maintenance, personal use)
-- Import an Airbnb/VRBO `.ics` calendar URL so this site never double-books
-- Export **this** site's bookings as an `.ics` feed to paste into Airbnb/VRBO
-- View and confirm/decline booking requests
-
-## 2. How booking works
-
-- A guest picks dates on a property page → the site checks availability and
-  price live (`/api/availability`).
-- If Stripe keys are **not** set: submitting the form creates a `PENDING`
-  booking and emails you + the guest. You confirm it manually from
-  `/admin/bookings`. This is the default, safest starting mode.
-- If Stripe keys **are** set: submitting the form creates a Stripe Checkout
-  session. On successful payment, a webhook marks the booking `CONFIRMED`
-  automatically.
-- Either way, confirmed/pending bookings immediately block those dates for
-  every other visitor — there's no double-booking window.
-
-### Turning on Stripe payments later
-1. Get your keys from the Stripe dashboard.
-2. Set `STRIPE_SECRET_KEY` and `STRIPE_PUBLISHABLE_KEY` in your production env.
-3. Add a webhook endpoint in Stripe pointing to `https://yoursite.com/api/webhooks/stripe`
-   listening for `checkout.session.completed`, and set `STRIPE_WEBHOOK_SECRET`.
-4. Redeploy. No code changes needed — the site detects the keys automatically.
-
-### Keeping Airbnb/VRBO in sync
-Each property has an export URL at `/api/ical/[slug]` — paste that into Airbnb's
-or VRBO's "import calendar" field. In the other direction, paste Airbnb's export
-URL into this site's admin page for that property (under "Calendar sync") and
-click "Sync now". Set up a daily cron (e.g. a Vercel Cron Job hitting a small
-sync route, or GitHub Actions) if you want it automatic rather than manual.
-
-## 3. Deploying to production
-
-See [`DEPLOY.md`](./DEPLOY.md) for a full click-by-click walkthrough
-(GitHub → Vercel → Neon Postgres → Vercel Blob for image uploads → your
-domain → optional Stripe/email setup). Short version:
-
-**Recommended: Vercel (hosting) + Neon or Supabase (Postgres database)**
-
-1. Push this project to a GitHub repo.
-2. Create a free Postgres database on [Neon](https://neon.tech) or
-   [Supabase](https://supabase.com) — copy the connection string.
-3. In `prisma/schema.prisma`, change:
-   ```prisma
-   datasource db {
-     provider = "postgresql"
-     url      = env("DATABASE_URL")
-   }
-   ```
-4. Import the repo into Vercel. Set these environment variables in the Vercel
-   project settings (same names as `.env.example`):
-   `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`,
-   `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SITE_NAME`, and the Stripe/Resend
-   keys once you're ready for them.
-5. Vercel's build will run `next build`. Run `npx prisma db push` once
-   (locally, pointed at the production `DATABASE_URL`, or via a one-off
-   Vercel deploy hook) to create the tables, then seed or add properties
-   from `/admin`.
-6. Point your domain's DNS at Vercel, and update `NEXT_PUBLIC_SITE_URL`.
-
-This also runs fine on any other Node host (Railway, Render, Fly.io, a VPS) —
-`npm run build && npm run start`, same env vars, any Postgres database.
-
-## 4. Project structure
+## Project structure
 
 ```
+src/middleware.ts          protects /admin and /api/admin
 src/app/                   pages + API routes (App Router)
   page.tsx                 homepage — property grid
-  properties/[slug]/       property detail + booking widget
-  book/[slug]/             guest details form + confirmation
-  admin/                   admin dashboard (protected by middleware.ts)
-  api/                     availability, bookings, checkout, webhooks, ical export
-src/components/            PropertyCard, BookingWidget, Nav, Footer, PropertyForm
-src/lib/                   prisma client, pricing/availability engine, auth,
-                            ical import/export, stripe, email, server actions
+  properties/[slug]/       property page, house-rules/, welcome/ (local guide)
+  book/[slug]/             booking form; confirmation/ = guest's "manage booking" page
+  terms/                   Terms & Conditions (draft — needs legal review)
+  admin/                   dashboard, properties, bookings, calendar, setup, stripe-setup
+  api/                     availability, bookings (+ [id]/cancel), checkout, webhooks/stripe,
+                           messages, ical, admin/*
+src/components/            UI (BookingWidget, PriceBreakdown, CancelBooking, calendars, forms…)
+src/lib/
+  policy.ts                every policy number + guest-facing policy text
+  pricing.ts               availability + nightly rates
+  smart-pricing.ts         smart-pricing rules
+  quote.ts                 final prices for each rate plan + long-stay payment schedule
+  cancellation.ts          refund calculator (pure, no I/O)
+  booking.ts               creates bookings (serializable transaction)
+  payments.ts              Stripe checkout, monthly billing, webhooks, cancellations/refunds
+  email.ts, notify.ts      emails
+  auth.ts, session-secret.ts  admin auth
+  actions.ts               admin server actions
 prisma/schema.prisma       data model
+prisma/migrations/         SQL migrations (0001_init is idempotent — safe on older databases)
+scripts/migrate.mjs        applies migrations during build
 ```
 
-## 5. Extending it
-
-- **Branding**: colors in `tailwind.config.ts`, site name in `.env`
-  (`NEXT_PUBLIC_SITE_NAME`), copy in `src/app/page.tsx`.
-- **Seasonal pricing**: the `PriceRule` model already supports date-range
-  overrides — add an admin UI for it or set rows directly via `prisma studio`
-  (`npm run db:studio`).
-- **More than 10 properties**: nothing in the code caps the count — the
-  "2–10" framing was just about scale/complexity, not a hard limit.
-- **Multi-currency / i18n**: not included — `formatCents()` in `src/lib/pricing.ts`
-  is the one place currency formatting happens.
-
-## Known limitations (be aware of these before launch)
-
-- Photo uploads use Vercel Blob storage — set `BLOB_READ_WRITE_TOKEN` (see
-  `DEPLOY.md`) to enable them. Without it, the admin form still accepts
-  pasted image URLs (any host/CDN works).
-- iCal import is manual ("Sync now") unless you wire up a cron job.
-- Admin auth is single-user (one email/password), which fits a small owner-operated
-  site; add a `User` table if multiple staff need separate logins.   
-  
+## Known limitations
+- Single admin login (one email/password).
+- iCal import is manual ("Sync now") — add a scheduled job to automate it.
+- Damage charges are made from the Stripe dashboard (cards are saved at checkout); there's no in-app damage-claim UI.
+- No automated test suite in the repo (the logic was verified with throwaway scripts during development — see HANDOVER.md).
+- Times are compared in server time (UTC on Vercel); "days before check-in" means calendar days.

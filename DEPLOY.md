@@ -1,163 +1,114 @@
-# Deploying to Vercel — step by step
+# Deploying
 
-This gets you from "code on my laptop" to a live site at your own domain.
-Total cost to start: **$0** (Vercel Hobby, Neon free tier, Vercel Blob free
-tier all cover a small direct-booking site comfortably).
+The site needs three things: a **Node host**, a **PostgreSQL database**, and a
+handful of **environment variables**. Database tables are created and updated
+automatically every time the site builds — there is no manual database step.
+
+Recommended low-cost setup: **Vercel** (hosting) + **Neon** (Postgres). Both
+have free tiers. Note: Vercel's free *Hobby* plan is intended for
+non-commercial use — a site taking paid bookings should use Vercel Pro
+(~$20/month) or one of the alternative hosts below. Check each provider's
+current terms.
 
 ---
 
-## 1. Put the code on GitHub
+## 1. Database (Neon)
 
-```bash
-cd booking-site
-git init
-git add .
-git commit -m "Initial commit"
-```
-
-Create a new empty repo on [github.com/new](https://github.com/new) (don't
-initialize it with a README), then:
-
-```bash
-git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPO.git
-git branch -M main
-git push -u origin main
-```
-
-## 2. Create your production database (Neon)
-
-1. Go to [neon.tech](https://neon.tech) → sign up (free) → **New Project**.
-2. Once created, copy the **connection string** it shows you — looks like
+1. Sign up at [neon.tech](https://neon.tech) → **New Project**.
+2. Copy the connection string, e.g.
    `postgresql://user:password@ep-xxxx.us-east-2.aws.neon.tech/neondb?sslmode=require`.
-   Keep this tab open, you'll paste it into Vercel in step 4.
-3. Back in your local project, open `prisma/schema.prisma` and change:
-   ```diff
-   datasource db {
-   -  provider = "sqlite"
-   +  provider = "postgresql"
-     url      = env("DATABASE_URL")
-   }
-   ```
-   Commit and push that change:
-   ```bash
-   git add prisma/schema.prisma
-   git commit -m "Switch to Postgres for production"
-   git push
-   ```
 
-## 3. Import the project into Vercel
+Any PostgreSQL works (Supabase, Railway, RDS, your own server).
 
-1. Go to [vercel.com/new](https://vercel.com/new) → sign in with GitHub →
-   **Import** your repo.
-2. Framework preset should auto-detect as **Next.js** — leave build settings
-   as default.
-3. Don't click Deploy yet — first open **Environment Variables** on this
-   same screen and add these (values from your local `.env` where you
-   generated them, plus the Neon string from step 2):
+## 2. Environment variables
 
-   | Key | Value |
-   |---|---|
-   | `DATABASE_URL` | the Neon connection string from step 2 |
-   | `ADMIN_EMAIL` | your login email |
-   | `ADMIN_PASSWORD_HASH` | run `node scripts/hash-password.js "yourpassword"` locally, paste the output |
-   | `SESSION_SECRET` | any long random string — e.g. run `openssl rand -hex 32` locally |
-   | `NEXT_PUBLIC_SITE_URL` | `https://your-project-name.vercel.app` for now (update after step 6) |
-   | `NEXT_PUBLIC_SITE_NAME` | your business name |
+Set these in your host (Vercel → Project → Settings → Environment Variables,
+for Production and Preview):
 
-   Leave `STRIPE_*`, `RESEND_API_KEY`, and `BLOB_READ_WRITE_TOKEN` unset for now — you'll add those in steps 5–6.
+| Variable | Required | Value |
+|---|---|---|
+| `DATABASE_URL` | yes | Postgres connection string from step 1 |
+| `ADMIN_EMAIL` | yes | your admin login email |
+| `ADMIN_PASSWORD_HASH` | yes | output of `node scripts/hash-password.js "your-password"` (paste the `$2a$…` value only) |
+| `SESSION_SECRET` | yes | 32+ random characters — `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Admin login is disabled without it. |
+| `NEXT_PUBLIC_SITE_URL` | yes | your public URL, e.g. `https://stay.yourbusiness.com` (no trailing slash). Used in emails and Stripe redirects. |
+| `NEXT_PUBLIC_SITE_NAME` | yes | your business name |
+| `STRIPE_SECRET_KEY` | for payments | see step 5 |
+| `STRIPE_PUBLISHABLE_KEY` | for payments | see step 5 |
+| `STRIPE_WEBHOOK_SECRET` | for payments | see step 5 — required whenever the secret key is set |
+| `RESEND_API_KEY` | for email | see step 6 |
+| `NOTIFY_EMAIL` | for email | where booking/cancellation/payment alerts go |
+| `EMAIL_FROM` | optional | e.g. `Your Business <bookings@yourdomain.com>` |
+| `BLOB_READ_WRITE_TOKEN` | for photo uploads | added automatically by Vercel Blob (step 4) |
 
-4. Click **Deploy**. First build will succeed but the site will error on any
-   page that touches the database, because the tables don't exist yet —
-   that's expected, fix it in the next step.
+`.env.example` lists the same variables with comments.
 
-## 4. Create the database tables
+## 3. Deploy
 
-From your local machine, temporarily point at production and push the schema:
+**Vercel:** [vercel.com/new](https://vercel.com/new) → import the GitHub repo →
+framework auto-detects as Next.js → add the variables above → **Deploy**.
+Every push to `main` redeploys.
+
+**Any other Node host** (Render, Railway, Fly.io, a VPS):
 
 ```bash
-# in booking-site/, don't commit this — just run it once
-DATABASE_URL="paste-your-neon-connection-string-here" npx prisma db push
+npm ci
+npm run build     # runs migrations, then builds
+npm start         # serves on $PORT (default 3000)
 ```
 
-Optionally seed two sample properties the same way:
-```bash
-DATABASE_URL="paste-your-neon-connection-string-here" npx tsx prisma/seed.ts
-```
-(You'll replace/delete these from `/admin/properties` once you add your real ones.)
+On first deploy against an empty database the build creates all tables. If the
+database was created by an older version of this app (which used
+`prisma db push`), the build upgrades it in place without touching existing data.
 
-Redeploy from the Vercel dashboard (Deployments → ⋯ → Redeploy), or just
-push any small commit — the site should now load properly.
+> GitHub + Vercel Hobby: if the repo is **private**, Vercel blocks deploys of
+> commits authored by anyone other than the account owner (including AI tools).
+> Keep the repo public, or use Vercel Pro.
 
-## 5. Turn on image uploads (optional but recommended)
+After deploying:
+1. Visit `/admin/login` and sign in.
+2. Add properties at `/admin/properties` (or run `npm run db:seed` locally against the database for two samples).
+3. Optional: `/admin/setup` applies the recommended smart-pricing rules to all properties in one click.
 
-1. In your Vercel project → **Storage** tab → **Create Database** → **Blob**.
-2. Once created, Vercel automatically adds `BLOB_READ_WRITE_TOKEN` to your
-   project's environment variables — no manual copy-paste needed.
-3. Redeploy for it to take effect. Now the admin property form's photo
-   uploader works directly.
+## 4. Photo uploads (optional)
 
-## 6. Connect your real domain
+Vercel → Project → **Storage** → **Create** → **Blob**. Vercel adds
+`BLOB_READ_WRITE_TOKEN` automatically; redeploy. Without it, paste image URLs
+into the property form instead (any public image host works).
 
-1. In Vercel → your project → **Settings → Domains** → add your domain
-   (e.g. `stay.yourbusiness.com` or `yourbusiness.com`).
-2. Vercel shows you either an A record or CNAME to add — go to your domain
-   registrar (GoDaddy, Namecheap, Google Domains, etc) and add that DNS
-   record.
-3. Wait for DNS to propagate (usually minutes, sometimes a few hours).
-   Vercel auto-issues an SSL certificate once it verifies.
-4. Update the `NEXT_PUBLIC_SITE_URL` environment variable in Vercel to your
-   real domain (`https://stay.yourbusiness.com`) and redeploy — this value
-   is used in booking confirmation links and the Stripe checkout redirect.
+## 5. Online payments — Stripe (optional)
 
-## 7. Turn on Stripe payments (optional — skip to stay in "Request to Book" mode)
+Full walkthrough: `/admin/stripe-setup` on your site (downloadable), or
+`public/stripe-setup-instructions.md`. Summary:
 
-1. Create a [Stripe account](https://dashboard.stripe.com/register) if you
-   don't have one, and finish their verification (needed before you can
-   accept real payments).
-2. In the Stripe dashboard → **Developers → API keys**, copy the
-   **Secret key** and **Publishable key**.
-3. Add both to Vercel's environment variables:
-   `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`.
-4. In Stripe → **Developers → Webhooks → Add endpoint**:
-   - Endpoint URL: `https://your-real-domain.com/api/webhooks/stripe`
-   - Event to send: `checkout.session.completed`
-   - After creating it, copy the **Signing secret** and add it to Vercel as
-     `STRIPE_WEBHOOK_SECRET`.
-5. Redeploy. Booking forms now show "Pay and book" instead of "Request to
-   book", and successful payments auto-confirm the booking.
+1. Stripe → **Developers → API keys** → copy the secret and publishable keys.
+2. Stripe → **Developers → Webhooks → Add endpoint**:
+   - URL: `https://YOUR-DOMAIN/api/webhooks/stripe`
+   - Events: `checkout.session.completed`, `checkout.session.expired`,
+     `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`
+   - Copy the signing secret.
+3. Set `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`; redeploy.
 
-You can start with Stripe **off** and turn it on later any time — nothing
-else about the site changes.
+Use test keys and card `4242 4242 4242 4242` first. For live payments, repeat
+with live keys and a live-mode webhook.
 
-## 8. Optional: email notifications
+## 6. Email — Resend (optional)
 
-Without this, booking notifications just get logged (not sent) — fine to
-skip while testing, but you'll want it live.
+1. Sign up at [resend.com](https://resend.com) and verify your sending domain (DNS records at your registrar).
+2. Set `RESEND_API_KEY`, `NOTIFY_EMAIL`, and `EMAIL_FROM` (an address on the verified domain); redeploy.
 
-1. Create a [Resend](https://resend.com) account (free tier is generous for
-   a small site).
-2. Verify your sending domain (Resend walks you through adding a couple of
-   DNS records — same registrar as step 6).
-3. Add `RESEND_API_KEY` and `NOTIFY_EMAIL` (the address that should receive
-   new-booking notifications) to Vercel's environment variables. Redeploy.
+Without Resend, emails are written to the host's logs instead of sent —
+guests won't receive their "manage booking" link, so set this up before launch.
 
-## 9. Keep Airbnb/VRBO in sync
+## 7. Custom domain
 
-For each property, in `/admin/properties/[id]`:
-- Copy the **export URL** shown under "Calendar sync" and paste it into
-  Airbnb/VRBO's "import calendar" setting for that listing.
-- Paste Airbnb/VRBO's **export URL** (find it in their calendar settings)
-  into the "Import calendar" field on this page, and click "Sync now"
-  whenever you want to refresh it. This is manual by default — automating
-  it with a daily Vercel Cron Job is a reasonable next step if you want it
-  hands-off.
+Vercel → Project → **Settings → Domains** → add your domain → add the DNS record
+Vercel shows at your registrar. SSL is automatic. Then update
+`NEXT_PUBLIC_SITE_URL` (and the Stripe webhook URL) and redeploy.
 
----
+## 8. Airbnb / VRBO calendar sync
 
-## You're live. Recap of what's now true:
-- Public site + admin dashboard running on Vercel, auto-deploying on every
-  `git push` to `main`.
-- Real Postgres database on Neon.
-- Either "Request to Book" or live Stripe payments, your choice.
-- Direct photo uploads from the admin form.
-- Calendar sync so you can't get double-booked against Airbnb/VRBO.
+For each property at `/admin/properties/[id]` → **Calendar sync**:
+- Paste the **export URL** shown there into Airbnb/VRBO's "import calendar".
+- Paste Airbnb/VRBO's export URL into **Import calendar** and click **Sync now**.
+  (Manual by default — see HANDOVER.md for automating it.)

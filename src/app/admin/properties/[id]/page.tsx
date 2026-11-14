@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import PropertyForm from "@/components/PropertyForm";
@@ -37,7 +38,9 @@ const RULE_TYPE_DESCRIPTIONS: Record<string, string> = {
   LOW_DEMAND: "Adjust when monthly occupancy is below X%. Threshold: percentage."
 };
 
-export default async function EditPropertyPage({ params }: { params: { id: string } }) {
+export default async function EditPropertyPage(props: { params: Promise<{ id: string }> }) {
+  await requireAdminPage();
+  const params = await props.params;
   const property = await prisma.property.findUnique({ where: { id: params.id } });
   if (!property) notFound();
 

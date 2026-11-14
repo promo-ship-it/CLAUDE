@@ -1,140 +1,59 @@
 import { NextRequest, NextResponse } from "next/server";
+import type Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
-import { prisma } from "@/lib/prisma";
-import { sendBookingEmails } from "@/lib/email";
-import { formatCents } from "@/lib/pricing";
-import { format } from "date-fns";
-import Stripe from "stripe";
+import {
+  handleCheckoutCompleted,
+  handleCheckoutExpired,
+  handleInvoicePaid,
+  handleInvoicePaymentFailed,
+  handleSubscriptionDeleted
+} from "@/lib/payments";
 
+// Stripe webhook. Configure in Stripe → Developers → Webhooks with these events:
+//   checkout.session.completed, checkout.session.expired, invoice.paid,
+//   invoice.payment_failed, customer.subscription.deleted
+// Every event MUST be signed: unsigned or unverifiable requests are rejected.
 export async function POST(req: NextRequest) {
-  if (!stripe) return NextResponse.json({ error: "Stripe not configured" }, { status: 400 });
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripe || !webhookSecret) {
+    console.error("[stripe webhook] STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET not configured");
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
+  }
 
   const sig = req.headers.get("stripe-signature");
-  const body = await req.text();
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!sig) return NextResponse.json({ error: "Missing signature" }, { status: 400 });
 
+  const body = await req.text();
   let event: Stripe.Event;
   try {
-    event = webhookSecret
-      ? stripe.webhooks.constructEvent(body, sig || "", webhookSecret)
-      : (JSON.parse(body) as Stripe.Event); // allows local testing without a signed secret
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err) {
-    console.error("Webhook signature verification failed", err);
+    console.error("[stripe webhook] signature verification failed", err);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  switch (event.type) {
-    // One-time payment completed OR subscription first payment completed
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const bookingId = session.metadata?.bookingId;
-      if (!bookingId) break;
-
-      if (session.mode === "subscription") {
-        // Recurring: store subscription ID and confirm booking
-        const subscriptionId = session.subscription as string;
-        const booking = await prisma.booking.update({
-          where: { id: bookingId },
-          data: {
-            status: "CONFIRMED",
-            stripeSubscriptionId: subscriptionId
-          },
-          include: { property: true }
-        });
-
-        await sendBookingEmails({
-          guestEmail: booking.guestEmail,
-          guestName: booking.guestName,
-          propertyName: booking.property.name,
-          checkIn: format(booking.checkIn, "MMM d, yyyy"),
-          checkOut: format(booking.checkOut, "MMM d, yyyy"),
-          total: formatCents(booking.total),
-          status: "CONFIRMED"
-        });
-      } else {
-        // One-time payment: confirm booking
-        const booking = await prisma.booking.update({
-          where: { id: bookingId },
-          data: { status: "CONFIRMED" },
-          include: { property: true }
-        });
-
-        await sendBookingEmails({
-          guestEmail: booking.guestEmail,
-          guestName: booking.guestName,
-          propertyName: booking.property.name,
-          checkIn: format(booking.checkIn, "MMM d, yyyy"),
-          checkOut: format(booking.checkOut, "MMM d, yyyy"),
-          total: formatCents(booking.total),
-          status: "CONFIRMED"
-        });
-      }
-      break;
+  try {
+    switch (event.type) {
+      case "checkout.session.completed":
+        await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        break;
+      case "checkout.session.expired":
+        await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
+        break;
+      case "invoice.paid":
+        await handleInvoicePaid(event.data.object as Stripe.Invoice);
+        break;
+      case "invoice.payment_failed":
+        await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+        break;
+      case "customer.subscription.deleted":
+        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        break;
     }
-
-    // Recurring payment succeeded (monthly invoice paid)
-    case "invoice.paid": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const subscriptionId = invoice.subscription as string;
-      if (!subscriptionId) break;
-
-      // Find the booking by subscription ID
-      const booking = await prisma.booking.findFirst({
-        where: { stripeSubscriptionId: subscriptionId }
-      });
-
-      if (booking) {
-        console.log(
-          `[subscription:payment] Booking ${booking.id} — invoice ${invoice.id} paid (${formatCents(invoice.amount_paid)})`
-        );
-      }
-      break;
-    }
-
-    // Recurring payment failed
-    case "invoice.payment_failed": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const subscriptionId = invoice.subscription as string;
-      if (!subscriptionId) break;
-
-      const booking = await prisma.booking.findFirst({
-        where: { stripeSubscriptionId: subscriptionId }
-      });
-
-      if (booking) {
-        console.error(
-          `[subscription:failed] Booking ${booking.id} — invoice ${invoice.id} payment failed`
-        );
-        // Optionally: mark booking as at-risk, send notification, etc.
-        // For now we just log it — Stripe will retry automatically per your retry settings
-      }
-      break;
-    }
-
-    // Subscription cancelled (guest cancelled or all payments completed)
-    case "customer.subscription.deleted": {
-      const subscription = event.data.object as Stripe.Subscription;
-
-      const booking = await prisma.booking.findFirst({
-        where: { stripeSubscriptionId: subscription.id }
-      });
-
-      if (booking) {
-        // If the stay is complete (checkout date has passed), mark as COMPLETED
-        const now = new Date();
-        if (booking.checkOut <= now) {
-          await prisma.booking.update({
-            where: { id: booking.id },
-            data: { status: "COMPLETED" }
-          });
-          console.log(`[subscription:completed] Booking ${booking.id} — subscription ended, stay completed`);
-        } else {
-          // Subscription cancelled before stay is over — flag it
-          console.warn(`[subscription:cancelled] Booking ${booking.id} — subscription cancelled early`);
-        }
-      }
-      break;
-    }
+  } catch (err) {
+    // 500 makes Stripe retry later; handlers are idempotent.
+    console.error(`[stripe webhook] ${event.type} failed`, err);
+    return NextResponse.json({ error: "Handler failed" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

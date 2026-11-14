@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { buildIcalFeed } from "@/lib/ical";
 
 // GET /api/ical/[slug] — paste this URL into Airbnb/VRBO's "import calendar" field
-export async function GET(_req: NextRequest, { params }: { params: { slug: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const property = await prisma.property.findUnique({ where: { slug: params.slug } });
   if (!property) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
