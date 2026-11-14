@@ -122,9 +122,9 @@ Tested in the build sandbox against a local Postgres-compatible database (PGlite
 - **Vercel Blob** is the only Vercel-specific service. Replacing it (e.g. Cloudflare R2 or S3) means changing `src/app/api/admin/upload/route.ts` only.
 - **Neon** can be swapped for any Postgres by changing `DATABASE_URL`.
 
-## 10. Unrelated files in this repo
+## 10. Scope of this repo
 
-`fit100/` (a separate fitness-tracker project) and `Untitled0.ipynb` (a Colab notebook) aren't part of the site. The owner tabled them; leave them alone or move them to their own repo.
+This repo contains only the direct booking site. The owner's separate 100-day fitness tracker now lives in its own private repo, `promo-ship-it/fit100`. Don't add it back here.
 
 ## 11. Ready-to-paste prompt for the next AI tool
 
