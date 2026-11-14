@@ -6,7 +6,7 @@
 // check-in date (server time, UTC on Vercel).
 
 /** Bump this whenever /terms changes. Stored on every booking at acceptance. */
-export const TERMS_VERSION = "2026-08-07";
+export const TERMS_VERSION = "2026-11-14";
 
 export const CHECK_IN_TIME = "3:00 PM";
 export const CHECK_OUT_TIME = "11:00 AM";
@@ -27,6 +27,12 @@ export const NON_REFUNDABLE_DISCOUNT_PERCENT = 10; // off the nightly rate (not 
 export const NON_REFUNDABLE_GRACE_HOURS = 24; // full refund within 24h of booking if check-in 7+ days away
 export const NON_REFUNDABLE_MIN_DAYS_BEFORE_CHECKIN = 5; // not offered inside 5 days of check-in
 export const NON_REFUNDABLE_MAX_DAYS_TO_CHECKOUT = 60; // not offered if checkout is 60+ days after booking
+
+// ── Damages (Terms §5) ─────────────────────────────────────────────────────
+export const DAMAGE_MAX_CENTS = 250000; // total damage charges per booking ($2,500)
+export const DAMAGE_NOTICE_HOURS = 48; // guest is notified at least this long before the card is charged
+export const SMOKING_FEE_CENTS = 50000; // $500
+export const PET_FEE_CENTS = 25000; // $250
 
 /** Unpaid Stripe checkouts hold the dates this long, then release them. */
 export const PENDING_PAYMENT_HOLD_MINUTES = 35;

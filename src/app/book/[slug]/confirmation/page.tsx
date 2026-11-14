@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { formatCents } from "@/lib/pricing";
+import { SITE } from "@/lib/config";
 import { format } from "date-fns";
 import Link from "next/link";
 import GuestMessages from "@/components/GuestMessages";
@@ -20,7 +21,11 @@ export default async function ConfirmationPage(props: {
   const booking = searchParams.bookingId
     ? await prisma.booking.findUnique({
         where: { id: searchParams.bookingId },
-        include: { property: true, payments: { orderBy: { paidAt: "asc" } } }
+        include: {
+          property: true,
+          payments: { orderBy: { paidAt: "asc" } },
+          damageClaims: { where: { status: { not: "CANCELLED" } }, orderBy: { createdAt: "asc" } }
+        }
       })
     : null;
 
@@ -99,6 +104,52 @@ export default async function ConfirmationPage(props: {
       {(booking.status === "CONFIRMED" || (booking.status === "PENDING" && !awaitingPayment)) && (
         <div className="mt-8">
           <CancelBooking bookingId={booking.id} token={searchParams.t} />
+        </div>
+      )}
+
+      {booking.damageClaims.length > 0 && (
+        <div className="ledger-card p-5 mt-8 text-left text-sm">
+          <p className="font-medium mb-2">Damage report</p>
+          {booking.damageClaims.map((c, i) => (
+            <div key={c.id} className={i > 0 ? "rule pt-3 mt-3" : ""}>
+              <div className="flex justify-between font-mono">
+                <span>{formatCents(c.amount)}</span>
+                <span className="text-ink/60">
+                  {c.status === "NOTICE_SENT" && `Charge scheduled for ${format(c.chargeAfter, "MMM d, yyyy")}`}
+                  {c.status === "CHARGING" && "Processing"}
+                  {c.status === "CHARGED" && "Charged to your card"}
+                  {c.status === "PAYMENT_LINK_SENT" && "Payment needed"}
+                  {c.status === "PAID" && "Paid — thank you"}
+                </span>
+              </div>
+              <p className="text-ink/70 mt-1 whitespace-pre-line">{c.description}</p>
+              <p className="mt-1 text-xs">
+                {(JSON.parse(c.photoUrls) as string[]).map((u, n) => (
+                  <a key={u} href={u} target="_blank" rel="noreferrer" className="text-brick hover:underline mr-3">
+                    Photo {n + 1}
+                  </a>
+                ))}
+              </p>
+              {c.status === "PAYMENT_LINK_SENT" && (
+                <a href={`/api/damage-claims/${c.id}/pay?t=${booking.messageToken}`} className="btn-primary mt-3 inline-flex">
+                  Pay {formatCents(c.amount)}
+                </a>
+              )}
+            </div>
+          ))}
+          <p className="text-xs text-ink/50 mt-3">Questions about this? Send us a message below.</p>
+        </div>
+      )}
+
+      {SITE.paymentsEnabled && booking.cardRequestedAt && !booking.stripePaymentMethodId && booking.status !== "CANCELLED" && (
+        <div className="ledger-card p-5 mt-8 text-left text-sm">
+          <p className="font-medium mb-1">Card on file requested</p>
+          <p className="text-ink/60 mb-3">
+            Nothing is charged now. Under Section 5 of our Terms it&apos;s only used for documented damages, with notice and photos first.
+          </p>
+          <a href={`/api/bookings/${booking.id}/save-card?t=${booking.messageToken}`} className="btn-secondary inline-flex">
+            Save a card securely
+          </a>
         </div>
       )}
 

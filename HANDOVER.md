@@ -26,6 +26,7 @@ owner can do, and what's left.
 | Emails with private "manage booking" link | Done (needs Resend keys to actually send) |
 | iCal export/import (Airbnb/VRBO) | Done (import is manual "Sync now") |
 | Admin login rate limit (5 failures / 15 min / IP) | Done |
+| Post-checkout damage charges: notice with photos → 48h → off-session charge on the saved card → payment-link fallback; save-card link (SetupIntent) for bookings without a card; $2,500 cap per booking | Done (fake-Stripe tested) |
 
 ## 3. Decisions already made by the owner (don't change without asking)
 
@@ -45,7 +46,7 @@ owner can do, and what's left.
 **Other decisions:**
 - Check-in is 3:00 PM and check-out is 11:00 AM.
 - Long-stay billing: payment 1 at booking (first 30 nights + cleaning fee, incl. tax); payment 2 is 30 days after check-in, then monthly. The last payment is prorated, and billing stops automatically.
-- Cards are saved for every Stripe booking, so the host can charge documented damages from the Stripe dashboard (Terms §5).
+- Cards are saved for every Stripe booking. Damage charges (Terms §5) are made from `/admin/bookings`: the guest gets a notice with description and photos, the card can be charged **48 hours** later (`DAMAGE_NOTICE_HOURS`), with a **$2,500 total cap per booking**. The 48-hour window was the developer's recommended default to reduce chargebacks; the owner can change it in `policy.ts` (bump `TERMS_VERSION`).
 
 ## 4. Owner-only tasks (accounts, keys, content, legal)
 
@@ -67,6 +68,7 @@ owner can do, and what's left.
 - **Webhooks:** must be signed (unsigned requests are rejected), and handlers are idempotent. Payments are recorded in `Payment`, which has a unique `stripeRef`.
 - **Database:** migrations only. `npm run build` runs `scripts/migrate.mjs`, which upgrades databases left by the old `db push` setup once. **Never** run `prisma db push --accept-data-loss` against production.
 - **Admin auth:** `src/middleware.ts` (it must live in `src/`), plus `requireAdminPage()` on admin pages, plus `requireAdmin()` in every server action.
+- **Damage claims:** `src/lib/damages.ts`, stored in `DamageClaim`, **not** in `Payment` (which drives cancellation refunds). Off-session charges use idempotency key `damage-<claimId>-<paymentMethodId>`. A claim moves `NOTICE_SENT → CHARGING → CHARGED`, or `→ PAYMENT_LINK_SENT → PAID`. A second payment for the same claim is refunded automatically.
 - **Guest access:** the private token in `?t=` (`Booking.messageToken`) gates the booking page, messages, and cancel.
 
 ## 6. What was verified, and how
@@ -80,6 +82,7 @@ Tested in the build sandbox against a local Postgres-compatible database (PGlite
   - double-booking prevention, and abandoned-checkout release;
   - the full long-stay billing lifecycle: subscription start date, switch to the prorated final amount, stop after the last payment, duplicate-webhook safety;
   - refunds issued via Stripe, the long-stay shortfall charge, and auto-refund of a payment that arrives late.
+- **33 damage-charge checks:** notice period, cap, photo rules, off-session charge, auth-required/declined/outage fallbacks, payment link + webhook, duplicate-payment refund, save-card SetupIntent flow, eligibility rules; plus **18 HTTP checks** for the damage routes, guest page, and Terms. Migration `0002` tested on a database matching production.
 - **4 webhook checks:** missing secret, unsigned, forged, and valid signatures.
 - **33 HTTP checks** against `next start`:
   - all public pages;
@@ -103,17 +106,18 @@ Tested in the build sandbox against a local Postgres-compatible database (PGlite
 5. Start a checkout and close the tab → within ~35 minutes the dates are bookable again, and the `checkout.session.expired` webhook marks it cancelled.
 6. Visit `/admin/bookings` in a private window → you're redirected to login.
 7. Send a guest message, then reply from admin.
-8. Review every page on a phone-sized screen.
+8. **Damage charge:** on a test booking whose check-out has passed, click **Report damage**. Then in the database set the claim's `chargeAfter` to the past (or wait 48h), click **Charge**, and confirm Stripe shows an off-session payment on the saved card. Repeat with Stripe's card `4000 0027 6000 3184` (requires authentication) and check that the guest gets a payment link that works.
+9. On a booking without a card, click **Ask guest to save a card**, complete the link, and confirm admin shows **Card on file: yes**.
+10. Review every page on a phone-sized screen.
 
 ## 8. Optional next work (in priority order)
 
 1. **Automatic iCal sync:** a cron route (Vercel Cron or GitHub Actions) that calls `syncIcalSource` for every source each hour, protected by a `CRON_SECRET`.
 2. **Reminder emails:** before check-in (with access instructions) and before each monthly payment.
-3. **Damage-claim UI** in admin, charging the saved card (currently done in the Stripe dashboard).
-4. **Per-property time zone** (currently UTC calendar days).
-5. **Automated tests:** port the checks from §6 into a real test suite (Vitest + a Postgres container).
-6. **React 19 / Next 16** upgrade (Next 15 + React 18 is supported today).
-7. Guest reviews, search/filters, and multiple admin users.
+3. **Per-property time zone** (currently UTC calendar days).
+4. **Automated tests:** port the checks from §6 into a real test suite (Vitest + a Postgres container).
+5. **React 19 / Next 16** upgrade (Next 15 + React 18 is supported today).
+6. Guest reviews, search/filters, and multiple admin users.
 
 ## 9. Avoiding paywalls
 

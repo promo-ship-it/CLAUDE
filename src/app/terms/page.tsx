@@ -1,7 +1,12 @@
 import { SITE } from "@/lib/config";
+import { formatCents } from "@/lib/format";
 import {
   CHECK_IN_TIME,
   CHECK_OUT_TIME,
+  DAMAGE_MAX_CENTS,
+  DAMAGE_NOTICE_HOURS,
+  PET_FEE_CENTS,
+  SMOKING_FEE_CENTS,
   GRACE_MIN_DAYS_BEFORE_CHECKIN,
   LONG_STAY_DISCOUNT_PERCENT,
   LONG_STAY_NIGHTS,
@@ -99,10 +104,11 @@ export default function TermsPage() {
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Guest agrees to treat the property and its contents with reasonable care.</li>
             <li>Guest is responsible for any damage to the property, furnishings, appliances, or linens beyond normal wear and tear.</li>
-            <li>If damage is discovered after check-out, Host will notify Guest with a description and photos, and Guest authorizes Host to charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of $2,500.</li>
+            <li>If damage is discovered after check-out, Host will email Guest a description, the amount, and photos at least {DAMAGE_NOTICE_HOURS} hours before charging. Guest authorizes Host to then charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of {formatCents(DAMAGE_MAX_CENTS)} per booking in total. Guest can respond during that time through the messaging system.</li>
+            <li>If the payment method on file can&apos;t be charged, or there isn&apos;t one, Guest will be emailed a secure payment link. Host may also ask Guest to save a card for this purpose; nothing is charged when a card is saved.</li>
             <li>Guest agrees to report any damage or maintenance issues immediately via the messaging system or by contacting the Host directly.</li>
-            <li>Smoking inside any property is strictly prohibited. A $500 cleaning surcharge will be assessed if evidence of smoking is found.</li>
-            <li>Unauthorized pets may result in a $250 cleaning surcharge.</li>
+            <li>Smoking inside any property is strictly prohibited. A {formatCents(SMOKING_FEE_CENTS)} cleaning surcharge will be assessed if evidence of smoking is found.</li>
+            <li>Unauthorized pets may result in a {formatCents(PET_FEE_CENTS)} cleaning surcharge.</li>
           </ul>
         </section>
 

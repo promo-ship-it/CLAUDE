@@ -71,8 +71,10 @@ export default function StripeSetupPage() {
         <div className="rule pt-4">
           <h3 className="font-medium mb-2">Damage charges</h3>
           <p className="text-ink/60">
-            Every guest&apos;s card is saved to a Stripe customer at checkout. To charge documented damages (per Terms §5), open
-            the customer in the Stripe dashboard and create a payment with their saved card.
+            Every guest&apos;s card is saved at checkout. After a stay, use <strong>Report damage</strong> on the booking in{" "}
+            <a href="/admin/bookings" className="text-brick hover:underline">Bookings</a>: the guest is emailed the description and
+            photos, and after 48 hours you can charge the saved card. If it can&apos;t be charged, the guest gets a payment link. For
+            bookings without a card, use <strong>Ask guest to save a card</strong>. No extra webhook events are needed.
           </p>
         </div>
       </div>

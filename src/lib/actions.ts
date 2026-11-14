@@ -117,13 +117,16 @@ export async function deleteProperty(propertyId: string) {
   await requireAdmin();
   // Never destroy payment records: properties with paid bookings must be
   // unpublished instead (uncheck "Published" on the property form).
-  const paid = await prisma.payment.count({ where: { booking: { propertyId } } });
+  const paid =
+    (await prisma.payment.count({ where: { booking: { propertyId } } })) +
+    (await prisma.damageClaim.count({ where: { booking: { propertyId }, status: { in: ["CHARGED", "PAID"] } } }));
   if (paid > 0) {
     throw new Error("This property has paid bookings, so it can't be deleted. Unpublish it instead.");
   }
   const bookingIds = (await prisma.booking.findMany({ where: { propertyId }, select: { id: true } })).map((b) => b.id);
   await prisma.$transaction([
     prisma.message.deleteMany({ where: { bookingId: { in: bookingIds } } }),
+    prisma.damageClaim.deleteMany({ where: { bookingId: { in: bookingIds } } }),
     prisma.booking.deleteMany({ where: { propertyId } }),
     prisma.blockedDate.deleteMany({ where: { propertyId } }),
     prisma.priceRule.deleteMany({ where: { propertyId } }),

@@ -66,6 +66,9 @@ model Booking {
   stripeSessionId String?
   stripeSubscriptionId String?  // for recurring monthly payments
   stripePaymentIntentId String? // one-time payments (used for refunds)
+  stripeCustomerId      String? // Stripe customer holding the guest's saved card
+  stripePaymentMethodId String? // saved card (set by the save-card flow; otherwise read from the first payment)
+  cardRequestedAt       DateTime? // host asked the guest to save a card
   monthlyAmount    Int?         // cents charged per full month, incl. tax (null = one-time payment)
   totalPayments    Int?         // total number of monthly payments
   proratedFinal    Int?         // cents for the final prorated payment, incl. tax (null if none)
@@ -91,6 +94,37 @@ model Booking {
 
   messages     Message[]
   payments     Payment[]
+  damageClaims DamageClaim[]
+}
+
+// Post-checkout damage claims (Terms §5). Kept separate from Payment, which
+// only holds stay payments and drives cancellation refunds.
+model DamageClaim {
+  id                    String            @id @default(cuid())
+  booking               Booking           @relation(fields: [bookingId], references: [id])
+  bookingId             String
+  amount                Int               // cents
+  description           String
+  photoUrls             String            // JSON array of image URLs
+  status                DamageClaimStatus @default(NOTICE_SENT)
+  noticeSentAt          DateTime          @default(now())
+  chargeAfter           DateTime          // earliest time the card may be charged
+  stripePaymentIntentId String?
+  failureReason         String?
+  chargedAt             DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([bookingId])
+}
+
+enum DamageClaimStatus {
+  NOTICE_SENT        // guest notified; waiting for the notice period to end
+  CHARGING           // charge in progress (short-lived lock)
+  CHARGED            // saved card charged successfully
+  PAYMENT_LINK_SENT  // card couldn't be charged; guest emailed a payment link
+  PAID               // guest paid through the link
+  CANCELLED          // host withdrew the claim
 }
 
 // Every successful charge for a booking (one-time payment, each monthly

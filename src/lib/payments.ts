@@ -107,6 +107,11 @@ export async function createCheckoutSession(booking: Booking, property: Property
 // ── Webhook handlers ────────────────────────────────────────────────────────
 
 export async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  // Checkout is also used for damage payments and saving a card (damages.ts).
+  const kind = session.metadata?.kind;
+  if (kind === "damage") return (await import("./damages")).handleDamageCheckoutCompleted(session);
+  if (kind === "card_setup") return (await import("./damages")).handleCardSetupCompleted(session);
+
   const bookingId = session.metadata?.bookingId;
   if (!bookingId || session.payment_status !== "paid") return;
   const s = requireStripe();
@@ -137,15 +142,20 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session) 
     return;
   }
 
+  const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
   let subscriptionId: string | null = booking.stripeSubscriptionId;
   if (booking.paymentType === "STRIPE_RECURRING" && (booking.totalPayments ?? 1) > 1 && !subscriptionId) {
-    const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id;
     if (customerId) subscriptionId = await startMonthlyBilling(booking, booking.property, customerId, piId);
   }
 
   const updated = await prisma.booking.update({
     where: { id: bookingId },
-    data: { status: "CONFIRMED", stripePaymentIntentId: piId, stripeSubscriptionId: subscriptionId },
+    data: {
+      status: "CONFIRMED",
+      stripePaymentIntentId: piId,
+      stripeSubscriptionId: subscriptionId,
+      stripeCustomerId: booking.stripeCustomerId ?? customerId
+    },
     include: { property: true }
   });
   await notifyBooking(updated, updated.property, "CONFIRMED");
@@ -252,6 +262,7 @@ export async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
 }
 
 export async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
+  if (session.metadata?.kind) return; // expired damage-payment / save-card sessions need no action
   const bookingId = session.metadata?.bookingId;
   if (!bookingId) return;
   await prisma.booking.updateMany({

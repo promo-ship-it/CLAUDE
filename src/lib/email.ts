@@ -92,3 +92,8 @@ export async function sendCancellationEmails(p: {
 export async function sendOwnerAlert(subject: string, body: string) {
   await send(SITE.supportEmail, `[${SITE.name}] ${subject}`, body);
 }
+
+/** Plain email to the guest (damage notices, payment links, card requests). */
+export async function sendGuestEmail(to: string, subject: string, body: string) {
+  await send(to, subject, body);
+}

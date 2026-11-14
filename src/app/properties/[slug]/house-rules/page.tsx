@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { formatCents } from "@/lib/format";
+import { DAMAGE_MAX_CENTS, PET_FEE_CENTS, SMOKING_FEE_CENTS } from "@/lib/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -34,15 +36,15 @@ export default async function HouseRulesPage(props: { params: Promise<{ slug: st
       <div className="rule mt-12 pt-8">
         <h2 className="text-lg font-display mb-4">General Rules (All Properties)</h2>
         <ul className="space-y-3 text-sm text-ink/70">
-          <li>No smoking inside the property. A $500 cleaning surcharge applies if evidence of smoking is found.</li>
+          <li>No smoking inside the property. A {formatCents(SMOKING_FEE_CENTS)} cleaning surcharge applies if evidence of smoking is found.</li>
           <li>No parties or events without prior written approval from the host.</li>
           <li>Quiet hours: 10:00 PM – 8:00 AM.</li>
           <li>Maximum occupancy must not be exceeded. Only registered guests may stay overnight.</li>
-          <li>No unauthorized pets. A $250 cleaning surcharge applies for unauthorized animals.</li>
+          <li>No unauthorized pets. A {formatCents(PET_FEE_CENTS)} cleaning surcharge applies for unauthorized animals.</li>
           <li>Please leave the property in reasonable condition — dishes washed, trash in bins, linens on beds.</li>
           <li>Report any damage or maintenance issues immediately via the messaging system.</li>
           <li>Lock all doors and windows when leaving the property.</li>
-          <li>Guest is responsible for damage beyond normal wear and tear (up to $2,500).</li>
+          <li>Guest is responsible for damage beyond normal wear and tear (up to {formatCents(DAMAGE_MAX_CENTS)}).</li>
         </ul>
       </div>
 
