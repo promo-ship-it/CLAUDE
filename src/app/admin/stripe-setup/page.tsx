@@ -1,19 +1,29 @@
-import Link from "next/link";
+import { SITE } from "@/lib/config";
+
+const EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.expired",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "customer.subscription.deleted"
+];
 
 export default function StripeSetupPage() {
   return (
     <div className="max-w-2xl">
       <h1 className="text-2xl mb-4">Stripe Payment Setup</h1>
-      <p className="text-sm text-ink/60 mb-8">
-        Follow the instructions below to connect Stripe and enable online payments.
-        You can also download the guide as a document.
+      <p className="text-sm text-ink/60 mb-2">
+        Connect Stripe to take payments online. This also turns on the non-refundable rate and automatic monthly billing for
+        stays of 30+ nights. Until then the site runs in &ldquo;Request to Book&rdquo; mode.
+      </p>
+      <p className="text-sm mb-8">
+        Status:{" "}
+        <strong className={SITE.paymentsEnabled ? "text-sage" : "text-brick"}>
+          {SITE.paymentsEnabled ? "Stripe connected" : "Not connected"}
+        </strong>
       </p>
 
-      <a
-        href="/stripe-setup-instructions.md"
-        download="Stripe-Setup-Instructions.md"
-        className="btn-primary inline-flex mb-10"
-      >
+      <a href="/stripe-setup-instructions.md" download="Stripe-Setup-Instructions.md" className="btn-primary inline-flex mb-10">
         Download Setup Instructions
       </a>
 
@@ -21,33 +31,49 @@ export default function StripeSetupPage() {
         <div>
           <h2 className="font-display text-lg mb-2">Quick Summary</h2>
           <ol className="list-decimal list-inside space-y-2 text-ink/70">
-            <li>Create a Stripe account at <a href="https://dashboard.stripe.com/register" target="_blank" className="text-brick hover:underline">dashboard.stripe.com</a></li>
-            <li>Go to <strong>Developers → API keys</strong> and copy your Secret key and Publishable key</li>
-            <li>Go to <strong>Developers → Webhooks → Add endpoint</strong>:
+            <li>
+              Create a Stripe account at{" "}
+              <a href="https://dashboard.stripe.com/register" target="_blank" rel="noreferrer" className="text-brick hover:underline">
+                dashboard.stripe.com
+              </a>{" "}
+              (start in Test mode).
+            </li>
+            <li>
+              Go to <strong>Developers → API keys</strong> and copy your Secret key and Publishable key.
+            </li>
+            <li>
+              Go to <strong>Developers → Webhooks → Add endpoint</strong>:
               <ul className="list-disc list-inside ml-4 mt-1 text-xs text-ink/50">
-                <li>URL: <code className="bg-sand px-1">your-site.vercel.app/api/webhooks/stripe</code></li>
-                <li>Events: checkout.session.completed, invoice.paid, invoice.payment_failed, customer.subscription.deleted</li>
+                <li>
+                  URL: <code className="bg-sand px-1">{SITE.url}/api/webhooks/stripe</code>
+                </li>
+                <li>Events: {EVENTS.join(", ")}</li>
               </ul>
             </li>
-            <li>Copy the webhook <strong>Signing secret</strong> (starts with whsec_)</li>
-            <li>Add all 3 keys to Vercel → Settings → Environment Variables:
-              <ul className="list-disc list-inside ml-4 mt-1 text-xs text-ink/50">
-                <li>STRIPE_SECRET_KEY</li>
-                <li>STRIPE_PUBLISHABLE_KEY</li>
-                <li>STRIPE_WEBHOOK_SECRET</li>
-              </ul>
+            <li>
+              Copy the webhook <strong>Signing secret</strong> (starts with whsec_). It&apos;s required — unsigned webhooks are rejected.
             </li>
-            <li>Redeploy (edit README on GitHub)</li>
+            <li>
+              Add all three to your host&apos;s environment variables: <code>STRIPE_SECRET_KEY</code>,{" "}
+              <code>STRIPE_PUBLISHABLE_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>.
+            </li>
+            <li>Redeploy.</li>
           </ol>
         </div>
 
         <div className="rule pt-4">
           <h3 className="font-medium mb-2">Test Card Number</h3>
           <p className="text-ink/60">Use this with TEST keys to simulate a payment:</p>
-          <code className="block bg-sand p-3 rounded-card mt-2 font-mono">
-            4242 4242 4242 4242
-          </code>
+          <code className="block bg-sand p-3 rounded-card mt-2 font-mono">4242 4242 4242 4242</code>
           <p className="text-xs text-ink/40 mt-1">Any future expiry date, any 3-digit CVC</p>
+        </div>
+
+        <div className="rule pt-4">
+          <h3 className="font-medium mb-2">Damage charges</h3>
+          <p className="text-ink/60">
+            Every guest&apos;s card is saved to a Stripe customer at checkout. To charge documented damages (per Terms §5), open
+            the customer in the Stripe dashboard and create a payment with their saved card.
+          </p>
         </div>
       </div>
     </div>

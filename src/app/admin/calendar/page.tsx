@@ -1,4 +1,6 @@
+import { requireAdminPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { activeBookingWhere } from "@/lib/pricing";
 import { format, startOfMonth, endOfMonth, addMonths } from "date-fns";
 import AdminCalendarView from "@/components/AdminCalendarView";
 
@@ -17,6 +19,7 @@ const PROPERTY_COLORS = [
 ];
 
 export default async function AdminCalendarPage() {
+  await requireAdminPage();
   const properties = await prisma.property.findMany({
     orderBy: { createdAt: "asc" },
     select: { id: true, name: true, slug: true }
@@ -29,7 +32,7 @@ export default async function AdminCalendarPage() {
   const [bookings, blockedDates] = await Promise.all([
     prisma.booking.findMany({
       where: {
-        status: { in: ["PENDING", "CONFIRMED"] },
+        ...activeBookingWhere(),
         checkOut: { gte: rangeStart },
         checkIn: { lte: rangeEnd }
       },

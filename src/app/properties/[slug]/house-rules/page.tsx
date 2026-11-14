@@ -4,7 +4,8 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function HouseRulesPage({ params }: { params: { slug: string } }) {
+export default async function HouseRulesPage(props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const property = await prisma.property.findUnique({ where: { slug: params.slug } });
   if (!property || !property.active) notFound();
 

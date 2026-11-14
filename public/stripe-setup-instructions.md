@@ -1,114 +1,80 @@
 # Stripe Payment Setup Instructions
 
-Follow these steps to enable live payments on your direct booking site.
+Connecting Stripe turns on online payments, the 10% non-refundable rate, and
+automatic monthly billing for stays of 30+ nights. Until Stripe is connected
+the site runs in "Request to Book" mode (no money collected online).
 
 ---
 
-## Step 1: Create a Stripe Account
+## Step 1: Create a Stripe account
 
-1. Go to https://dashboard.stripe.com/register
-2. Sign up with your email and create an account
-3. Complete Stripe's business verification (required before accepting real payments)
+1. Go to https://dashboard.stripe.com/register and create an account.
+2. Stay in **Test mode** (toggle in the top-right) until everything works.
+3. Before going live, complete Stripe's business verification.
 
----
+## Step 2: Copy your API keys
 
-## Step 2: Get Your API Keys
+1. In Stripe, open **Developers → API keys**.
+2. Copy the **Publishable key** (`pk_test_…`) and the **Secret key** (`sk_test_…`).
 
-1. Log into https://dashboard.stripe.com
-2. Click **Developers** in the left sidebar (or top nav)
-3. Click **API keys**
-4. You'll see two keys:
-   - **Publishable key** — starts with `pk_test_` (test) or `pk_live_` (live)
-   - **Secret key** — starts with `sk_test_` (test) or `sk_live_` (live)
-5. Copy both keys — you'll paste them into Vercel in Step 4
+## Step 3: Create the webhook
 
-**TIP:** Start with TEST keys (toggle "Test mode" in the top-right of the Stripe dashboard). This lets you test bookings without real charges. Switch to LIVE keys when you're ready to accept real money.
-
----
-
-## Step 3: Create a Webhook Endpoint
-
-1. In the Stripe dashboard, go to **Developers** → **Webhooks**
-2. Click **"Add endpoint"**
-3. Set the **Endpoint URL** to:
-
-   ```
-   https://YOUR-DOMAIN.vercel.app/api/webhooks/stripe
-   ```
-
-   (Replace YOUR-DOMAIN with your actual Vercel URL)
-
-4. Under **"Select events to listen to"**, click **"+ Select events"** and add:
+1. In Stripe, open **Developers → Webhooks → Add endpoint**.
+2. Endpoint URL: `https://YOUR-DOMAIN/api/webhooks/stripe`
+3. Select these 5 events:
    - `checkout.session.completed`
+   - `checkout.session.expired`
    - `invoice.paid`
    - `invoice.payment_failed`
    - `customer.subscription.deleted`
+4. Save, then click **Reveal** next to *Signing secret* and copy it (`whsec_…`).
 
-5. Click **"Add endpoint"**
-6. Once created, click on your endpoint → click **"Reveal"** next to "Signing secret"
-7. Copy the signing secret — starts with `whsec_`
+The signing secret is **required**. The site rejects any webhook that isn't signed.
 
----
+## Step 4: Add the keys to your host
 
-## Step 4: Add Keys to Vercel
+In Vercel: **Project → Settings → Environment Variables** (Production and Preview):
 
-1. Go to https://vercel.com → click your project → **Settings** → **Environment Variables**
-2. Add these three variables:
+| Key | Value |
+|---|---|
+| `STRIPE_SECRET_KEY` | `sk_test_…` (later `sk_live_…`) |
+| `STRIPE_PUBLISHABLE_KEY` | `pk_test_…` (later `pk_live_…`) |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` |
 
-   | Key                        | Value                    |
-   |----------------------------|--------------------------|
-   | `STRIPE_SECRET_KEY`        | `sk_test_...` or `sk_live_...` |
-   | `STRIPE_PUBLISHABLE_KEY`   | `pk_test_...` or `pk_live_...` |
-   | `STRIPE_WEBHOOK_SECRET`    | `whsec_...`              |
+## Step 5: Redeploy and test
 
-3. Make sure "Production and Preview" is selected for the environment
+1. Redeploy the site.
+2. Open `/admin/stripe-setup` — status should say **Stripe connected**.
+3. Book a property with test card `4242 4242 4242 4242` (any future date, any CVC).
+4. You land on the guest's booking page; within seconds it shows **Booking confirmed**.
+5. Check `/admin/bookings`: the booking shows **CONFIRMED** and **paid $…**.
+6. Test a cancellation from the guest's booking page — Stripe shows the refund.
+7. Test a 30+ night stay — Stripe shows a subscription that starts billing 30 days after check-in.
 
----
+## Going live
 
-## Step 5: Redeploy
+1. In Stripe, switch off Test mode.
+2. Copy the **live** keys and create the webhook again in live mode (live webhooks are separate).
+3. Replace the three environment variables with the live values and redeploy.
 
-1. Go to GitHub: https://github.com/promo-ship-it/CLAUDE/blob/main/README.md
-2. Click the pencil icon (edit)
-3. Add a blank line or space
-4. Click "Commit changes"
-5. Wait 2-3 minutes for Vercel to redeploy
+## How money moves (for reference)
 
----
-
-## Step 6: Test It
-
-1. Visit your site and try booking a property
-2. You should now see **"Pay $XXX and book"** instead of "Send request to book"
-3. With TEST keys, use Stripe's test card: `4242 4242 4242 4242` (any future expiry, any CVC)
-4. After payment, the booking should auto-confirm
-
----
-
-## Going Live (When Ready)
-
-1. In Stripe dashboard, toggle OFF "Test mode" (top-right corner)
-2. Copy your LIVE keys (`pk_live_...` and `sk_live_...`)
-3. Create a new webhook endpoint with the same URL and events (live mode has separate webhooks)
-4. Update the 3 environment variables in Vercel with the live values
-5. Redeploy
-
-**IMPORTANT:** In live mode, Stripe requires completed business verification before you can accept payments.
-
----
+- **Under 30 nights:** the full total is charged at checkout.
+- **30+ nights:** payment 1 (first 30 nights + cleaning fee) at checkout; then a
+  subscription charges each remaining payment, starting 30 days after check-in.
+  The last payment is prorated, and billing stops automatically after it.
+- **Cancellations:** the guest (from their booking link) or you (from
+  `/admin/bookings`) cancel on the site; the refund is calculated by the policy
+  and issued through Stripe automatically. Long-stay notice balances are charged
+  to the saved card.
+- **Unfinished checkouts** release the dates after about 35 minutes.
+- **Damage charges:** every card is saved to a Stripe customer. Charge documented
+  damages from the customer page in the Stripe dashboard.
 
 ## Troubleshooting
 
-- **"Online payment is not enabled"** — The STRIPE_SECRET_KEY environment variable isn't set or the deploy hasn't picked it up yet. Check Vercel env vars and redeploy.
-- **Payment succeeds but booking stays PENDING** — The webhook isn't reaching your site. Check that STRIPE_WEBHOOK_SECRET is correct and the endpoint URL matches exactly.
-- **"Invalid signature" errors in logs** — The STRIPE_WEBHOOK_SECRET doesn't match. Re-copy it from Stripe → Developers → Webhooks → your endpoint → Signing secret.
-
----
-
-## Monthly Recurring Payments (30+ Night Stays)
-
-These work automatically once Stripe is connected. For stays of 30 nights or more:
-- Guest is charged monthly (not all upfront)
-- The additional webhook events (`invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`) handle the recurring billing lifecycle
-- An 18% long-stay discount is automatically applied
-
-No additional Stripe configuration needed — just make sure all 4 webhook events from Step 3 are enabled.
+- **"Online payment is not enabled"** — `STRIPE_SECRET_KEY` is missing or the site wasn't redeployed.
+- **Paid but stuck on "Confirming your payment…"** — the webhook isn't arriving.
+  Check the endpoint URL, that all 5 events are selected, and that
+  `STRIPE_WEBHOOK_SECRET` matches. Stripe → Webhooks shows each delivery and its response.
+- **Webhook responses of 500 "Webhook not configured"** — `STRIPE_WEBHOOK_SECRET` is not set.

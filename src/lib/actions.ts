@@ -3,7 +3,17 @@
 import { prisma } from "./prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { format } from "date-fns";
 import { syncIcalSource as syncIcalSourceLib } from "./ical";
+import { isAdminAuthed } from "./auth";
+import { notifyBooking } from "./notify";
+import { sendCancellationEmails } from "./email";
+
+// Server actions can be invoked directly over HTTP, so every admin action
+// checks the session itself rather than relying only on the middleware.
+async function requireAdmin() {
+  if (!(await isAdminAuthed())) throw new Error("Not authorized");
+}
 
 function slugify(name: string) {
   return name
@@ -14,6 +24,7 @@ function slugify(name: string) {
 }
 
 export async function createProperty(formData: FormData) {
+  await requireAdmin();
   const name = String(formData.get("name"));
   const slug = slugify(String(formData.get("slug") || name));
 
@@ -58,6 +69,7 @@ export async function createProperty(formData: FormData) {
 }
 
 export async function updateProperty(propertyId: string, formData: FormData) {
+  await requireAdmin();
   await prisma.property.update({
     where: { id: propertyId },
     data: {
@@ -102,22 +114,60 @@ export async function updateProperty(propertyId: string, formData: FormData) {
 }
 
 export async function deleteProperty(propertyId: string) {
-  await prisma.booking.deleteMany({ where: { propertyId } });
-  await prisma.blockedDate.deleteMany({ where: { propertyId } });
-  await prisma.priceRule.deleteMany({ where: { propertyId } });
-  await prisma.icalSource.deleteMany({ where: { propertyId } });
-  await prisma.property.delete({ where: { id: propertyId } });
+  await requireAdmin();
+  // Never destroy payment records: properties with paid bookings must be
+  // unpublished instead (uncheck "Published" on the property form).
+  const paid = await prisma.payment.count({ where: { booking: { propertyId } } });
+  if (paid > 0) {
+    throw new Error("This property has paid bookings, so it can't be deleted. Unpublish it instead.");
+  }
+  const bookingIds = (await prisma.booking.findMany({ where: { propertyId }, select: { id: true } })).map((b) => b.id);
+  await prisma.$transaction([
+    prisma.message.deleteMany({ where: { bookingId: { in: bookingIds } } }),
+    prisma.booking.deleteMany({ where: { propertyId } }),
+    prisma.blockedDate.deleteMany({ where: { propertyId } }),
+    prisma.priceRule.deleteMany({ where: { propertyId } }),
+    prisma.smartPricingRule.deleteMany({ where: { propertyId } }),
+    prisma.icalSource.deleteMany({ where: { propertyId } }),
+    prisma.property.delete({ where: { id: propertyId } })
+  ]);
   revalidatePath("/admin/properties");
   revalidatePath("/");
   redirect("/admin/properties");
 }
 
+/** Host confirms or declines a request-to-book inquiry (no payment involved). */
 export async function updateBookingStatus(bookingId: string, status: "CONFIRMED" | "CANCELLED") {
-  await prisma.booking.update({ where: { id: bookingId }, data: { status } });
+  await requireAdmin();
+  const updated = await prisma.booking.updateMany({
+    where: { id: bookingId, status: "PENDING", paymentType: "INQUIRY" },
+    data:
+      status === "CONFIRMED"
+        ? { status }
+        : { status, cancelledAt: new Date(), cancelledBy: "HOST", refundAmount: 0, cancellationNote: "Request declined by the host." }
+  });
+  if (updated.count === 1) {
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { property: true } });
+    if (status === "CONFIRMED") {
+      await notifyBooking(booking, booking.property, "CONFIRMED");
+    } else {
+      await sendCancellationEmails({
+        guestEmail: booking.guestEmail,
+        guestName: booking.guestName,
+        propertyName: booking.property.name,
+        checkIn: format(booking.checkIn, "MMM d, yyyy"),
+        checkOut: format(booking.checkOut, "MMM d, yyyy"),
+        refund: "$0 (no payment was taken)",
+        explanation: "Unfortunately we can't host you on these dates.",
+        cancelledBy: "HOST"
+      });
+    }
+  }
   revalidatePath("/admin/bookings");
 }
 
 export async function addBlockedDate(propertyId: string, formData: FormData) {
+  await requireAdmin();
   const date = new Date(String(formData.get("date")));
   await prisma.blockedDate.upsert({
     where: { propertyId_date_source: { propertyId, date, source: "manual" } },
@@ -128,11 +178,13 @@ export async function addBlockedDate(propertyId: string, formData: FormData) {
 }
 
 export async function removeBlockedDate(propertyId: string, blockedDateId: string) {
+  await requireAdmin();
   await prisma.blockedDate.delete({ where: { id: blockedDateId } });
   revalidatePath(`/admin/properties/${propertyId}`);
 }
 
 export async function addIcalSource(propertyId: string, formData: FormData) {
+  await requireAdmin();
   await prisma.icalSource.create({
     data: {
       propertyId,
@@ -144,11 +196,13 @@ export async function addIcalSource(propertyId: string, formData: FormData) {
 }
 
 export async function syncIcalSourceAction(propertyId: string, sourceId: string) {
+  await requireAdmin();
   await syncIcalSourceLib(sourceId);
   revalidatePath(`/admin/properties/${propertyId}`);
 }
 
 export async function addPriceRule(propertyId: string, formData: FormData) {
+  await requireAdmin();
   const startDate = new Date(String(formData.get("startDate")));
   const endDate = new Date(String(formData.get("endDate")));
   const price = Math.round(Number(formData.get("price") || 0) * 100);
@@ -163,6 +217,7 @@ export async function addPriceRule(propertyId: string, formData: FormData) {
 }
 
 export async function removePriceRule(propertyId: string, ruleId: string) {
+  await requireAdmin();
   await prisma.priceRule.delete({ where: { id: ruleId } });
   revalidatePath(`/admin/properties/${propertyId}`);
 }
@@ -174,6 +229,7 @@ export async function logoutAction() {
 }
 
 export async function toggleSmartPricing(propertyId: string, formData: FormData) {
+  await requireAdmin();
   const enabled = formData.get("enabled") === "true";
   await prisma.property.update({
     where: { id: propertyId },
@@ -183,6 +239,7 @@ export async function toggleSmartPricing(propertyId: string, formData: FormData)
 }
 
 export async function addSmartPricingRule(propertyId: string, formData: FormData) {
+  await requireAdmin();
   const ruleType = String(formData.get("ruleType"));
   const threshold = String(formData.get("threshold") || "");
   const adjustment = Number(formData.get("adjustment") || 0);
@@ -201,6 +258,7 @@ export async function addSmartPricingRule(propertyId: string, formData: FormData
 }
 
 export async function removeSmartPricingRule(propertyId: string, ruleId: string) {
+  await requireAdmin();
   await prisma.smartPricingRule.delete({ where: { id: ruleId } });
   revalidatePath(`/admin/properties/${propertyId}`);
 }

@@ -1,6 +1,7 @@
-import { prisma } from "./prisma";
-import { getUnavailableDates } from "./pricing";
+import type { PrismaClient, Prisma, SmartPricingRule } from "@prisma/client";
 import { startOfMonth, endOfMonth, differenceInCalendarDays, addDays, startOfDay } from "date-fns";
+
+type Db = PrismaClient | Prisma.TransactionClient;
 
 export type SmartPriceAdjustment = {
   ruleType: string;
@@ -9,141 +10,103 @@ export type SmartPriceAdjustment = {
 };
 
 /**
- * Calculate smart pricing adjustments for a specific night.
- * Returns the combined percentage adjustment to apply to the base/seasonal rate.
+ * Loads the property's smart pricing rules ONCE and returns a fast, in-memory
+ * function that gives the percentage adjustment for any night.
  *
- * Rules stack — e.g. a weekend night that's also high-demand could get +15% + +10% = +25%.
- * But total adjustment is capped at -50% to +100% to prevent extreme prices.
+ * Rules stack (e.g. weekend +15% and high demand +20% = +35%); the total is
+ * capped between -50% and +100%.
+ *
+ * `unavailable` is the set of booked/blocked ISO dates (yyyy-mm-dd), used for
+ * the occupancy-based HIGH_DEMAND / LOW_DEMAND rules.
  */
-export async function getSmartPriceAdjustment(
+export async function loadSmartPricer(
+  db: Db,
   propertyId: string,
-  night: Date
-): Promise<{ totalAdjustment: number; applied: SmartPriceAdjustment[] }> {
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: { smartPricingEnabled: true }
-  });
+  smartPricingEnabled: boolean,
+  unavailable: Set<string>,
+  now: Date = new Date()
+): Promise<(night: Date) => { totalAdjustment: number; applied: SmartPriceAdjustment[] }> {
+  const none = () => ({ totalAdjustment: 0, applied: [] as SmartPriceAdjustment[] });
+  if (!smartPricingEnabled) return none;
 
-  if (!property?.smartPricingEnabled) {
-    return { totalAdjustment: 0, applied: [] };
-  }
-
-  const rules = await prisma.smartPricingRule.findMany({
+  const rules: SmartPricingRule[] = await db.smartPricingRule.findMany({
     where: { propertyId, active: true }
   });
+  if (rules.length === 0) return none;
 
-  if (rules.length === 0) {
-    return { totalAdjustment: 0, applied: [] };
-  }
+  const today = startOfDay(now);
+  const occupancyCache = new Map<string, number>();
+  const monthOccupancy = (night: Date) => {
+    const key = `${night.getFullYear()}-${night.getMonth()}`;
+    const cached = occupancyCache.get(key);
+    if (cached !== undefined) return cached;
+    const monthStart = startOfMonth(night);
+    const monthEnd = endOfMonth(night);
+    const totalDays = differenceInCalendarDays(monthEnd, monthStart) + 1;
+    let booked = 0;
+    for (let d = monthStart; d <= monthEnd; d = addDays(d, 1)) {
+      if (unavailable.has(d.toISOString().slice(0, 10))) booked++;
+    }
+    const pct = (booked / totalDays) * 100;
+    occupancyCache.set(key, pct);
+    return pct;
+  };
 
-  const applied: SmartPriceAdjustment[] = [];
-  const today = startOfDay(new Date());
-  const daysUntilNight = differenceInCalendarDays(night, today);
+  return (night: Date) => {
+    const applied: SmartPriceAdjustment[] = [];
+    const daysUntilNight = differenceInCalendarDays(night, today);
 
-  for (const rule of rules) {
-    switch (rule.ruleType) {
-      case "DAY_OF_WEEK": {
-        // threshold = comma-separated day numbers (0=Sun, 1=Mon, ..., 6=Sat)
-        const days = (rule.threshold || "5,6").split(",").map(Number);
-        if (days.includes(night.getDay())) {
-          applied.push({
-            ruleType: "DAY_OF_WEEK",
-            adjustment: rule.adjustment,
-            reason: `Weekend/day-of-week adjustment`
-          });
+    for (const rule of rules) {
+      switch (rule.ruleType) {
+        case "DAY_OF_WEEK": {
+          // threshold = comma-separated day numbers (0=Sun … 6=Sat)
+          const days = (rule.threshold || "5,6").split(",").map(Number);
+          if (days.includes(night.getDay())) {
+            applied.push({ ruleType: rule.ruleType, adjustment: rule.adjustment, reason: "Day-of-week" });
+          }
+          break;
         }
-        break;
-      }
-
-      case "LAST_MINUTE": {
-        // threshold = max days before check-in (e.g. "7" means within 7 days)
-        const maxDays = Number(rule.threshold || "7");
-        if (daysUntilNight >= 0 && daysUntilNight <= maxDays) {
-          applied.push({
-            ruleType: "LAST_MINUTE",
-            adjustment: rule.adjustment,
-            reason: `Last-minute (within ${maxDays} days)`
-          });
+        case "LAST_MINUTE": {
+          const maxDays = Number(rule.threshold || "7");
+          if (daysUntilNight >= 0 && daysUntilNight <= maxDays) {
+            applied.push({ ruleType: rule.ruleType, adjustment: rule.adjustment, reason: `Within ${maxDays} days` });
+          }
+          break;
         }
-        break;
-      }
-
-      case "FAR_OUT": {
-        // threshold = min days before check-in (e.g. "60" means 60+ days out)
-        const minDays = Number(rule.threshold || "60");
-        if (daysUntilNight >= minDays) {
-          applied.push({
-            ruleType: "FAR_OUT",
-            adjustment: rule.adjustment,
-            reason: `Far-out booking (${minDays}+ days ahead)`
-          });
+        case "FAR_OUT": {
+          const minDays = Number(rule.threshold || "60");
+          if (daysUntilNight >= minDays) {
+            applied.push({ ruleType: rule.ruleType, adjustment: rule.adjustment, reason: `${minDays}+ days ahead` });
+          }
+          break;
         }
-        break;
-      }
-
-      case "HIGH_DEMAND": {
-        // threshold = occupancy percentage (e.g. "70" means when 70%+ of the month is booked)
-        const threshold = Number(rule.threshold || "70");
-        const occupancy = await getMonthOccupancy(propertyId, night);
-        if (occupancy >= threshold) {
-          applied.push({
-            ruleType: "HIGH_DEMAND",
-            adjustment: rule.adjustment,
-            reason: `High demand (${Math.round(occupancy)}% booked this month)`
-          });
+        case "HIGH_DEMAND": {
+          const threshold = Number(rule.threshold || "70");
+          const occ = monthOccupancy(night);
+          if (occ >= threshold) {
+            applied.push({ ruleType: rule.ruleType, adjustment: rule.adjustment, reason: `${Math.round(occ)}% booked` });
+          }
+          break;
         }
-        break;
-      }
-
-      case "LOW_DEMAND": {
-        // threshold = occupancy percentage (e.g. "30" means when less than 30% of the month is booked)
-        const threshold = Number(rule.threshold || "30");
-        const occupancy = await getMonthOccupancy(propertyId, night);
-        if (occupancy < threshold) {
-          applied.push({
-            ruleType: "LOW_DEMAND",
-            adjustment: rule.adjustment,
-            reason: `Low demand (${Math.round(occupancy)}% booked this month)`
-          });
+        case "LOW_DEMAND": {
+          const threshold = Number(rule.threshold || "30");
+          const occ = monthOccupancy(night);
+          if (occ < threshold) {
+            applied.push({ ruleType: rule.ruleType, adjustment: rule.adjustment, reason: `${Math.round(occ)}% booked` });
+          }
+          break;
         }
-        break;
       }
     }
-  }
 
-  // Sum adjustments, cap between -50% and +100%
-  const rawTotal = applied.reduce((sum, a) => sum + a.adjustment, 0);
-  const totalAdjustment = Math.max(-50, Math.min(100, rawTotal));
-
-  return { totalAdjustment, applied };
+    const raw = applied.reduce((sum, a) => sum + a.adjustment, 0);
+    return { totalAdjustment: Math.max(-50, Math.min(100, raw)), applied };
+  };
 }
 
 /**
- * Calculate what percentage of a month is already booked/blocked for a property.
- * Used by HIGH_DEMAND and LOW_DEMAND rules.
- */
-async function getMonthOccupancy(propertyId: string, night: Date): Promise<number> {
-  const monthStart = startOfMonth(night);
-  const monthEnd = endOfMonth(night);
-  const totalDays = differenceInCalendarDays(monthEnd, monthStart) + 1;
-
-  const unavailable = await getUnavailableDates(propertyId);
-
-  let bookedDays = 0;
-  let cursor = monthStart;
-  while (cursor <= monthEnd) {
-    const iso = cursor.toISOString().slice(0, 10);
-    if (unavailable.has(iso)) bookedDays++;
-    cursor = addDays(cursor, 1);
-  }
-
-  return (bookedDays / totalDays) * 100;
-}
-
-/**
- * Apply smart pricing adjustment to a base rate (in cents).
- * Enforces min/max price guardrails if provided.
- * Returns the adjusted rate.
+ * Apply a percentage adjustment to a nightly rate (cents), round to the
+ * nearest whole dollar, and enforce the property's floor/ceiling.
  */
 export function applyAdjustment(
   basePriceCents: number,
@@ -152,12 +115,8 @@ export function applyAdjustment(
   maxPrice?: number | null
 ): number {
   const adjusted = basePriceCents * (1 + adjustmentPercent / 100);
-  // Round to nearest 100 cents ($1) for clean pricing
   let rate = Math.round(adjusted / 100) * 100;
-
-  // Enforce floor and ceiling
   if (minPrice && rate < minPrice) rate = minPrice;
   if (maxPrice && rate > maxPrice) rate = maxPrice;
-
   return rate;
 }

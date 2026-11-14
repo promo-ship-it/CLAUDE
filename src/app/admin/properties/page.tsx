@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { formatCents } from "@/lib/pricing";
@@ -7,6 +8,7 @@ import PropertyForm from "@/components/PropertyForm";
 export const dynamic = "force-dynamic";
 
 export default async function AdminPropertiesPage() {
+  await requireAdminPage();
   const properties = await prisma.property.findMany({ orderBy: { createdAt: "asc" } });
 
   return (

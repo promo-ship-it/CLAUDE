@@ -1,16 +1,19 @@
+import { requireAdminPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { formatCents } from "@/lib/pricing";
+import { activeBookingWhere, formatCents } from "@/lib/pricing";
 import { format } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
+  await requireAdminPage();
   const [propertyCount, pendingBookings, upcoming] = await Promise.all([
     prisma.property.count(),
-    prisma.booking.count({ where: { status: "PENDING" } }),
+    // Requests waiting on the host (unpaid Stripe checkouts aren't requests).
+    prisma.booking.count({ where: { status: "PENDING", paymentType: "INQUIRY" } }),
     prisma.booking.findMany({
-      where: { status: { in: ["PENDING", "CONFIRMED"] }, checkIn: { gte: new Date() } },
+      where: { ...activeBookingWhere(), checkIn: { gte: new Date() } },
       orderBy: { checkIn: "asc" },
       take: 5,
       include: { property: true }

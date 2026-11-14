@@ -1,40 +1,84 @@
 import { SITE } from "@/lib/config";
+import {
+  CHECK_IN_TIME,
+  CHECK_OUT_TIME,
+  GRACE_MIN_DAYS_BEFORE_CHECKIN,
+  LONG_STAY_DISCOUNT_PERCENT,
+  LONG_STAY_NIGHTS,
+  LONG_TERM_FULL_REFUND_DAYS,
+  LONG_TERM_NOTICE_NIGHTS,
+  MODERATE_FULL_REFUND_DAYS,
+  MODERATE_GRACE_HOURS,
+  NON_REFUNDABLE_DISCOUNT_PERCENT,
+  NON_REFUNDABLE_GRACE_HOURS,
+  NON_REFUNDABLE_MAX_DAYS_TO_CHECKOUT,
+  NON_REFUNDABLE_MIN_DAYS_BEFORE_CHECKIN,
+  TERMS_VERSION
+} from "@/lib/policy";
 
+// DRAFT — have a lawyer review before launch. Every number below comes from
+// src/lib/policy.ts, which is also what the refund calculator uses, so the
+// terms and the actual refunds can't drift apart.
 export default function TermsPage() {
   return (
     <div className="max-w-3xl mx-auto px-6 py-16">
       <p className="label-eyebrow mb-3">Legal</p>
-      <h1 className="text-3xl md:text-4xl mb-10">Terms & Conditions</h1>
+      <h1 className="text-3xl md:text-4xl mb-10">Terms &amp; Conditions</h1>
 
       <div className="prose prose-sm text-ink/80 space-y-8">
         <section>
-          <h2 className="text-xl font-display mb-3">1. Booking & Payment</h2>
+          <h2 className="text-xl font-display mb-3">1. Booking &amp; Payment</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
-            <li>By completing a booking, you ("Guest") enter into a rental agreement with {SITE.name} ("Host") for the specified property and dates.</li>
-            <li>All prices are displayed in USD and include applicable taxes and fees unless otherwise stated.</li>
-            <li>For stays under 30 nights, full payment is collected at the time of booking.</li>
-            <li>For stays of 30 nights or more, payment is collected monthly via automatic recurring charges to the payment method on file. By booking, you authorize these recurring charges for the duration of your stay.</li>
-            <li>A cleaning fee is charged once per stay and is non-refundable after confirmation.</li>
+            <li>By completing a booking, you (&ldquo;Guest&rdquo;) enter into a rental agreement with {SITE.name} (&ldquo;Host&rdquo;) for the specified property and dates.</li>
+            <li>All prices are in USD. The total shown before you book includes the nightly rate, cleaning fee, and taxes, and is the amount you pay.</li>
+            <li>For stays under {LONG_STAY_NIGHTS} nights, full payment is collected at the time of booking.</li>
+            <li>For stays of {LONG_STAY_NIGHTS} nights or more, a {LONG_STAY_DISCOUNT_PERCENT}% long-stay discount applies and payment is collected monthly: the first payment (first 30 nights plus the cleaning fee) at booking, then automatic payments on the dates shown in your payment schedule. By booking a long stay, you authorize these charges to the card you provide. Billing stops automatically after the final payment.</li>
+            <li>Your card is saved securely by our payment processor (Stripe) for the scheduled payments and for any charges described in Section 5.</li>
             <li>Bookings are confirmed only after successful payment (or host approval in Request-to-Book mode).</li>
           </ul>
         </section>
 
         <section>
           <h2 className="text-xl font-display mb-3">2. Cancellation Policy</h2>
+          <p className="text-sm mb-3">
+            &ldquo;Days before check-in&rdquo; means calendar days before the check-in date. The policy that applies is the one shown when you booked and in your confirmation email.
+          </p>
+
+          <h3 className="text-base font-display mb-2">Standard rate — Moderate (stays under {LONG_STAY_NIGHTS} nights)</h3>
+          <ul className="list-disc list-inside space-y-2 text-sm mb-4">
+            <li><strong>Grace period:</strong> full refund if you cancel within {MODERATE_GRACE_HOURS} hours of booking, as long as check-in is at least {GRACE_MIN_DAYS_BEFORE_CHECKIN} days away.</li>
+            <li><strong>{MODERATE_FULL_REFUND_DAYS} or more days before check-in:</strong> full refund.</li>
+            <li><strong>Less than {MODERATE_FULL_REFUND_DAYS} days before check-in:</strong> the first night plus 50% of the remaining nights are non-refundable; the rest is refunded. The cleaning fee and taxes are refunded in the same proportion.</li>
+            <li><strong>After check-in:</strong> nights already stayed plus one additional night are non-refundable, and 50% of the remaining unused nights are refunded.</li>
+          </ul>
+
+          <h3 className="text-base font-display mb-2">Non-refundable rate (stays under {LONG_STAY_NIGHTS} nights)</h3>
+          <ul className="list-disc list-inside space-y-2 text-sm mb-4">
+            <li>An optional rate {NON_REFUNDABLE_DISCOUNT_PERCENT}% below the standard nightly rate (the discount does not apply to the cleaning fee).</li>
+            <li>Offered only when check-in is at least {NON_REFUNDABLE_MIN_DAYS_BEFORE_CHECKIN} days away and checkout is within {NON_REFUNDABLE_MAX_DAYS_TO_CHECKOUT} days of booking, and only when paying online.</li>
+            <li><strong>Grace period:</strong> full refund if you cancel within {NON_REFUNDABLE_GRACE_HOURS} hours of booking, as long as check-in is at least {GRACE_MIN_DAYS_BEFORE_CHECKIN} days away.</li>
+            <li><strong>After the grace period:</strong> no refund of any part of the booking, including the cleaning fee and taxes.</li>
+          </ul>
+
+          <h3 className="text-base font-display mb-2">Long stays — Firm ({LONG_STAY_NIGHTS}+ nights)</h3>
+          <ul className="list-disc list-inside space-y-2 text-sm mb-4">
+            <li><strong>{LONG_TERM_FULL_REFUND_DAYS} or more days before check-in:</strong> full refund.</li>
+            <li><strong>Less than {LONG_TERM_FULL_REFUND_DAYS} days before check-in, or during the stay:</strong> you owe the nights already stayed plus {LONG_TERM_NOTICE_NIGHTS} additional nights (or the rest of the stay, if fewer nights remain), plus the cleaning fee and applicable taxes. Remaining scheduled payments stop. Anything you have paid beyond that is refunded; if you have paid less, the difference is charged to your card on file.</li>
+          </ul>
+
+          <h3 className="text-base font-display mb-2">All bookings</h3>
           <ul className="list-disc list-inside space-y-2 text-sm">
-            <li><strong>More than 14 days before check-in:</strong> Full refund minus a $50 processing fee.</li>
-            <li><strong>7–14 days before check-in:</strong> 50% refund of the nightly rate; cleaning fee non-refundable.</li>
-            <li><strong>Less than 7 days before check-in:</strong> No refund.</li>
-            <li><strong>Monthly stays:</strong> Guest may cancel with 30 days written notice. Payments already charged are non-refundable. The remaining billing cycle will not be charged.</li>
-            <li>If the Host cancels, Guest receives a full refund.</li>
+            <li>Cancel any time from the link in your booking email; the exact refund is shown before you confirm.</li>
+            <li>If the Host cancels, you receive a full refund.</li>
+            <li>Refunds are returned to the original card, usually within 5–10 business days.</li>
           </ul>
         </section>
 
         <section>
-          <h2 className="text-xl font-display mb-3">3. Check-In & Check-Out</h2>
+          <h2 className="text-xl font-display mb-3">3. Check-In &amp; Check-Out</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
-            <li>Check-in time: 3:00 PM (or as specified in the property listing).</li>
-            <li>Check-out time: 11:00 AM (or as specified in the property listing).</li>
+            <li>Check-in time: {CHECK_IN_TIME} (or as specified in the property listing).</li>
+            <li>Check-out time: {CHECK_OUT_TIME} (or as specified in the property listing).</li>
             <li>Early check-in or late check-out may be available upon request but is not guaranteed.</li>
             <li>Keys/access codes will be provided prior to arrival via email or message.</li>
           </ul>
@@ -51,11 +95,11 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-display mb-3">5. Property Care & Damages</h2>
+          <h2 className="text-xl font-display mb-3">5. Property Care &amp; Damages</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Guest agrees to treat the property and its contents with reasonable care.</li>
             <li>Guest is responsible for any damage to the property, furnishings, appliances, or linens beyond normal wear and tear.</li>
-            <li>If damage is discovered after check-out, Guest authorizes Host to charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of $2,500.</li>
+            <li>If damage is discovered after check-out, Host will notify Guest with a description and photos, and Guest authorizes Host to charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of $2,500.</li>
             <li>Guest agrees to report any damage or maintenance issues immediately via the messaging system or by contacting the Host directly.</li>
             <li>Smoking inside any property is strictly prohibited. A $500 cleaning surcharge will be assessed if evidence of smoking is found.</li>
             <li>Unauthorized pets may result in a $250 cleaning surcharge.</li>
@@ -63,7 +107,7 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-display mb-3">6. Liability & Safety</h2>
+          <h2 className="text-xl font-display mb-3">6. Liability &amp; Safety</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Host provides the property in a clean, safe, and habitable condition. Guest acknowledges that they use the property at their own risk.</li>
             <li>Host is not liable for personal injury, illness, theft, or loss of personal belongings during the stay.</li>
@@ -73,9 +117,10 @@ export default function TermsPage() {
         </section>
 
         <section>
-          <h2 className="text-xl font-display mb-3">7. Privacy & Communication</h2>
+          <h2 className="text-xl font-display mb-3">7. Privacy &amp; Communication</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Guest information (name, email, phone) is collected solely for booking management and communication purposes.</li>
+            <li>Card details are handled by Stripe and are never stored on this website.</li>
             <li>Guest may receive booking-related emails including confirmations, reminders, and post-stay follow-ups.</li>
             <li>Guest information is never sold to third parties.</li>
             <li>The messaging feature is for stay-related communication only.</li>
@@ -86,7 +131,7 @@ export default function TermsPage() {
           <h2 className="text-xl font-display mb-3">8. Force Majeure</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Neither party shall be liable for failure to perform due to circumstances beyond their reasonable control, including natural disasters, government actions, pandemics, or utility failures.</li>
-            <li>In such cases, Host will offer either alternative dates or a full refund at Guest's choice.</li>
+            <li>In such cases, Host will offer either alternative dates or a full refund at Guest&apos;s choice, regardless of the rate booked.</li>
           </ul>
         </section>
 
@@ -101,14 +146,14 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-display mb-3">10. Modifications</h2>
           <ul className="list-disc list-inside space-y-2 text-sm">
-            <li>Host reserves the right to update these terms at any time. Changes take effect for bookings made after the update date.</li>
-            <li>The terms in effect at the time of booking govern that booking.</li>
+            <li>Host may update these terms at any time. Changes apply only to bookings made after the update.</li>
+            <li>The terms in effect at the time of booking govern that booking. The version you accepted is recorded with your booking.</li>
           </ul>
         </section>
 
         <section className="rule pt-6">
           <p className="text-xs text-ink/40">
-            Last updated: August 2026. By completing a booking on {SITE.name}, you acknowledge that you have read, understood, and agree to these Terms & Conditions.
+            Version {TERMS_VERSION}. By completing a booking on {SITE.name}, you acknowledge that you have read, understood, and agree to these Terms &amp; Conditions.
           </p>
         </section>
       </div>
