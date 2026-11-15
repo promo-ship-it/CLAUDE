@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { prisma } from "./prisma";
 import { getUnavailableDates, nightsBetween, nightsCount } from "./pricing";
 import { getQuotes, type Quote } from "./quote";
-import { TERMS_VERSION, type RatePlan } from "./policy";
+import { TERMS_VERSION, depositAmountFor, type RatePlan } from "./policy";
 
 export type GuestInfo = {
   name: string;
@@ -63,6 +63,8 @@ export async function createPendingBooking(args: {
         }
 
         const isRecurring = quote.plan === "LONG_TERM_FIRM" && args.paymentType === "STRIPE";
+        // Security hold only when paying online (a card is saved at checkout).
+        const deposit = args.paymentType === "STRIPE" ? depositAmountFor(quote.nights) : 0;
         const booking = await tx.booking.create({
           data: {
             propertyId: property.id,
@@ -86,6 +88,8 @@ export async function createPendingBooking(args: {
             totalPayments: quote.monthly?.totalPayments ?? null,
             proratedFinal: quote.monthly?.finalCharge ?? null,
             paymentSchedule: quote.schedule ? JSON.stringify(quote.schedule) : null,
+            depositAmount: deposit > 0 ? deposit : null,
+            depositStatus: deposit > 0 ? "SCHEDULED" : null,
             termsVersion: TERMS_VERSION,
             termsAcceptedAt: new Date(),
             status: "PENDING",

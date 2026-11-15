@@ -5,7 +5,15 @@ import { format } from "date-fns";
 import Link from "next/link";
 import GuestMessages from "@/components/GuestMessages";
 import CancelBooking from "@/components/CancelBooking";
-import { CHECK_IN_TIME, CHECK_OUT_TIME, POLICY_NAMES, POLICY_SUMMARIES, type RatePlan } from "@/lib/policy";
+import {
+  CHECK_IN_TIME,
+  CHECK_OUT_TIME,
+  DEPOSIT_PLACE_DAYS_BEFORE,
+  DEPOSIT_RELEASE_DAYS,
+  POLICY_NAMES,
+  POLICY_SUMMARIES,
+  type RatePlan
+} from "@/lib/policy";
 import type { ScheduleItem } from "@/lib/quote";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +115,28 @@ export default async function ConfirmationPage(props: {
         </div>
       )}
 
+      {booking.depositAmount && booking.depositStatus && booking.status !== "PENDING" && (
+        <div className="ledger-card p-5 mt-8 text-left text-sm">
+          <p className="font-medium mb-1">Security hold: {formatCents(booking.depositAmount)}</p>
+          <p className="text-ink/60">
+            {booking.depositStatus === "SCHEDULED" &&
+              `A refundable hold (not a charge) will be placed on your card ${DEPOSIT_PLACE_DAYS_BEFORE} day before check-in and released ${DEPOSIT_RELEASE_DAYS} days after check-out unless damage is reported.`}
+            {["PLACING", "RENEWING", "CAPTURING"].includes(booking.depositStatus) && "Updating…"}
+            {booking.depositStatus === "HELD" &&
+              `Held on your card (not charged). Released ${DEPOSIT_RELEASE_DAYS} days after check-out unless damage is reported.`}
+            {booking.depositStatus === "FAILED" &&
+              "We couldn't place the hold on your card. Please save a working card (prepaid cards aren't accepted). Nothing is charged when you save it."}
+            {booking.depositStatus === "CAPTURED" && `${formatCents(booking.depositCapturedAmount)} was used for the damage report below; the rest was released.`}
+            {booking.depositStatus === "RELEASED" && "Released."}
+          </p>
+          {booking.depositStatus === "FAILED" && SITE.paymentsEnabled && (
+            <a href={`/api/bookings/${booking.id}/save-card?t=${booking.messageToken}`} className="btn-primary mt-3 inline-flex">
+              Save a working card
+            </a>
+          )}
+        </div>
+      )}
+
       {booking.damageClaims.length > 0 && (
         <div className="ledger-card p-5 mt-8 text-left text-sm">
           <p className="font-medium mb-2">Damage report</p>
@@ -132,7 +162,7 @@ export default async function ConfirmationPage(props: {
               </p>
               {c.status === "PAYMENT_LINK_SENT" && (
                 <a href={`/api/damage-claims/${c.id}/pay?t=${booking.messageToken}`} className="btn-primary mt-3 inline-flex">
-                  Pay {formatCents(c.amount)}
+                  Pay {formatCents(c.amount - c.fromDepositAmount)}
                 </a>
               )}
             </div>

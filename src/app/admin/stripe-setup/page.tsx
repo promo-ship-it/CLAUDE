@@ -1,4 +1,6 @@
 import { SITE } from "@/lib/config";
+import { formatCents } from "@/lib/format";
+import { DEPOSIT_PLACE_DAYS_BEFORE, DEPOSIT_RELEASE_DAYS, depositAmountFor } from "@/lib/policy";
 
 const EVENTS = [
   "checkout.session.completed",
@@ -57,6 +59,10 @@ export default function StripeSetupPage() {
               Add all three to your host&apos;s environment variables: <code>STRIPE_SECRET_KEY</code>,{" "}
               <code>STRIPE_PUBLISHABLE_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code>.
             </li>
+            <li>
+              Also add <code>CRON_SECRET</code> (16+ random characters). It runs the daily security-hold job; without it no holds
+              are placed.
+            </li>
             <li>Redeploy.</li>
           </ol>
         </div>
@@ -75,6 +81,18 @@ export default function StripeSetupPage() {
             <a href="/admin/bookings" className="text-brick hover:underline">Bookings</a>: the guest is emailed the description and
             photos, and after 48 hours you can charge the saved card. If it can&apos;t be charged, the guest gets a payment link. For
             bookings without a card, use <strong>Ask guest to save a card</strong>. No extra webhook events are needed.
+          </p>
+        </div>
+
+        <div className="rule pt-4">
+          <h3 className="font-medium mb-2">Security hold</h3>
+          <p className="text-ink/60">
+            A refundable {formatCents(depositAmountFor(1))} hold (not a charge) is placed on the saved card {DEPOSIT_PLACE_DAYS_BEFORE}{" "}
+            day{DEPOSIT_PLACE_DAYS_BEFORE === 1 ? "" : "s"} before check-in, renewed automatically for long stays, and released{" "}
+            {DEPOSIT_RELEASE_DAYS} days after check-out. Damage charges use it first. In Stripe it shows as an{" "}
+            <strong>Uncaptured</strong> payment. If it fails, the guest is emailed a link to save a working card and you get an alert.
+            Prepaid cards are refused. Test with <code>4000 0000 0000 9995</code> (insufficient funds) and{" "}
+            <code>5105 1051 0510 5100</code> (prepaid).
           </p>
         </div>
       </div>

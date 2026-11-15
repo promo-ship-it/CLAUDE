@@ -6,6 +6,8 @@ import { format } from "date-fns";
 import AdminMessages from "@/components/AdminMessages";
 import CancelBooking from "@/components/CancelBooking";
 import DamageClaims from "@/components/DamageClaims";
+import DepositControls from "@/components/DepositControls";
+import { depositPlaceFrom, depositReleaseAt } from "@/lib/deposits";
 import { damageEligibility, hasCardOnFile } from "@/lib/damages";
 import { SITE } from "@/lib/config";
 import {
@@ -105,6 +107,18 @@ export default async function AdminBookingsPage() {
                   )}
                 </div>
               </div>
+              {b.depositAmount && b.depositStatus && (
+                <DepositControls
+                  bookingId={b.id}
+                  amount={b.depositAmount}
+                  status={b.depositStatus}
+                  heldUntil={b.depositHeldUntil?.toISOString() ?? null}
+                  placeFrom={depositPlaceFrom(b).toISOString()}
+                  releaseAt={depositReleaseAt(b).toISOString()}
+                  captured={b.depositCapturedAmount}
+                  note={b.depositNote}
+                />
+              )}
               {(damageReason === null || b.damageClaims.length > 0) && (
                 <DamageClaims
                   bookingId={b.id}
@@ -114,6 +128,7 @@ export default async function AdminBookingsPage() {
                     description: c.description,
                     photoUrls: JSON.parse(c.photoUrls) as string[],
                     status: c.status,
+                    fromDepositAmount: c.fromDepositAmount,
                     chargeAfter: c.chargeAfter.toISOString(),
                     failureReason: c.failureReason
                   }))}

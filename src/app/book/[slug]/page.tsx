@@ -4,7 +4,13 @@ import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { formatCents } from "@/lib/format";
 import type { Quote, QuoteSet } from "@/lib/quote";
-import { POLICY_NAMES, POLICY_SUMMARIES } from "@/lib/policy";
+import {
+  DEPOSIT_PLACE_DAYS_BEFORE,
+  DEPOSIT_RELEASE_DAYS,
+  POLICY_NAMES,
+  POLICY_SUMMARIES,
+  depositAmountFor
+} from "@/lib/policy";
 import PriceBreakdown from "@/components/PriceBreakdown";
 
 // useSearchParams requires a Suspense boundary in Next 14's App Router,
@@ -171,6 +177,14 @@ function BookPageInner() {
             <span className="font-medium text-ink">Cancellation policy — {POLICY_NAMES[selected.plan]}:</span>{" "}
             {POLICY_SUMMARIES[selected.plan]}
           </div>
+
+          {paymentsEnabled && depositAmountFor(selected.nights) > 0 && (
+            <div className="text-xs text-ink/60 -mt-6 mb-8 leading-relaxed">
+              <span className="font-medium text-ink">Security hold:</span> a refundable {formatCents(depositAmountFor(selected.nights))} hold
+              (not a charge) is placed on your card {DEPOSIT_PLACE_DAYS_BEFORE} day{DEPOSIT_PLACE_DAYS_BEFORE === 1 ? "" : "s"} before check-in and released{" "}
+              {DEPOSIT_RELEASE_DAYS} days after check-out unless damage is reported. Prepaid cards aren&apos;t accepted.
+            </div>
+          )}
         </>
       )}
 

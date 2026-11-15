@@ -11,6 +11,7 @@ export type DamageClaimView = {
   description: string;
   photoUrls: string[];
   status: "NOTICE_SENT" | "CHARGING" | "CHARGED" | "PAYMENT_LINK_SENT" | "PAID" | "CANCELLED";
+  fromDepositAmount: number;
   chargeAfter: string;
   failureReason: string | null;
 };
@@ -99,7 +100,7 @@ export default function DamageClaims({
         <span className="font-medium text-ink/70">Damages</span>
         <span className="text-ink/50">
           Card on file: {hasCard ? "yes" : "no"}
-          {!hasCard && paymentsEnabled && (
+          {paymentsEnabled && (
             <button
               className="ml-2 text-brick hover:underline disabled:opacity-40"
               disabled={busy !== null}
@@ -110,7 +111,7 @@ export default function DamageClaims({
                 })
               }
             >
-              {cardRequested ? "Re-send card request" : "Ask guest to save a card"}
+              {hasCard ? "Ask guest for a new card" : cardRequested ? "Re-send card request" : "Ask guest to save a card"}
             </button>
           )}
         </span>
@@ -126,6 +127,9 @@ export default function DamageClaims({
                 {STATUS_TEXT[c.status]}
               </span>
             </div>
+            {c.fromDepositAmount > 0 && (
+              <p className="text-ink/50 mt-1">{formatCents(c.fromDepositAmount)} taken from the security hold</p>
+            )}
             <p className="text-ink/70 mt-1 whitespace-pre-line">{c.description}</p>
             <p className="mt-1">
               {c.photoUrls.map((u, i) => (
@@ -147,7 +151,7 @@ export default function DamageClaims({
                       const r = await post(`/api/admin/damage-claims/${c.id}/charge`);
                       return r.outcome === "CHARGED"
                         ? `Charged ${formatCents(c.amount)} to the guest's card.`
-                        : `Couldn't charge the card (${r.reason}). The guest was emailed a payment link.`;
+                        : `Couldn't charge the card for the rest (${r.reason}). The guest was emailed a payment link.`;
                     })
                   }
                 >

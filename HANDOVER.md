@@ -26,7 +26,9 @@ owner can do, and what's left.
 | Emails with private "manage booking" link | Done (needs Resend keys to actually send) |
 | iCal export/import (Airbnb/VRBO) | Done (import is manual "Sync now") |
 | Admin login rate limit (5 failures / 15 min / IP) | Done |
-| Post-checkout damage charges: notice with photos → 48h → off-session charge on the saved card → payment-link fallback; save-card link (SetupIntent) for bookings without a card; $2,500 cap per booking | Done (fake-Stripe tested) |
+| Post-checkout damage charges: notice with photos → 48h → taken from the security hold first, then an off-session charge on the saved card → payment-link fallback; save-card link (SetupIntent) for bookings without a card or to replace a failing one; $2,500 cap per booking | Done (fake-Stripe tested) |
+| Refundable security hold ($350): placed 1 day before check-in, renewed automatically for long stays, released 3 days after check-out; on failure the guest is emailed a save-card link and the host is alerted | Done (fake-Stripe tested) |
+| Prepaid cards blocked at checkout and when saving a card | Done (not yet tested against real Stripe) |
 
 ## 3. Decisions already made by the owner (don't change without asking)
 
@@ -48,10 +50,13 @@ owner can do, and what's left.
 - Long-stay billing: payment 1 at booking (first 30 nights + cleaning fee, incl. tax); payment 2 is 30 days after check-in, then monthly. The last payment is prorated, and billing stops automatically.
 - Cards are saved for every Stripe booking. Damage charges (Terms §5) are made from `/admin/bookings`: the guest gets a notice with description and photos, the card can be charged **48 hours** later (`DAMAGE_NOTICE_HOURS`), with a **$2,500 total cap per booking**. The 48-hour window was the developer's recommended default to reduce chargebacks; the owner can change it in `policy.ts` (bump `TERMS_VERSION`).
 
+- **Security hold:** $350 for every online-paid booking (`DEPOSIT_TIERS`; add rows to vary it by length of stay). Renewed automatically before Stripe's ~7-day authorization limit. If it can't be placed, the guest is emailed a link to save a working card and the host is alerted; the host decides whether to give check-in access (the site doesn't send door codes). **Developer defaults, not yet confirmed by the owner:** placed **1 day before check-in** (`DEPOSIT_PLACE_DAYS_BEFORE`), released **3 days after check-out** (`DEPOSIT_RELEASE_DAYS`), and the Terms §5 wording that the host may withhold check-in instructions until a hold is in place.
+- **Prepaid cards are refused** (`BLOCK_PREPAID_CARDS`). Virtual cards can't be detected by Stripe; the hold is the protection against them.
+
 ## 4. Owner-only tasks (accounts, keys, content, legal)
 
 - [ ] **Rotate secrets.** The current admin password, its hash, and `SESSION_SECRET` were shared in a chat transcript. Generate new ones (commands in DEPLOY.md §2) and update them in Vercel.
-- [ ] **Stripe:** create keys and the webhook with all **5** events (DEPLOY.md §5), add the 3 env vars, then redeploy.
+- [ ] **Stripe:** create keys and the webhook with all **5** events (DEPLOY.md §5), add the 3 env vars plus `CRON_SECRET`, then redeploy.
 - [ ] **Resend:** verify the sending domain and set `RESEND_API_KEY`, `NOTIFY_EMAIL`, `EMAIL_FROM`. This is needed before launch, because guests get their manage-booking link by email.
 - [ ] **Custom domain:** add it in Vercel, then update `NEXT_PUBLIC_SITE_URL` and the Stripe webhook URL.
 - [ ] **Hosting plan:** Vercel Hobby is for non-commercial use, so move to Pro or another host before taking paid bookings.
@@ -69,6 +74,9 @@ owner can do, and what's left.
 - **Database:** migrations only. `npm run build` runs `scripts/migrate.mjs`, which upgrades databases left by the old `db push` setup once. **Never** run `prisma db push --accept-data-loss` against production.
 - **Admin auth:** `src/middleware.ts` (it must live in `src/`), plus `requireAdminPage()` on admin pages, plus `requireAdmin()` in every server action.
 - **Damage claims:** `src/lib/damages.ts`, stored in `DamageClaim`, **not** in `Payment` (which drives cancellation refunds). Off-session charges use idempotency key `damage-<claimId>-<paymentMethodId>`. A claim moves `NOTICE_SENT → CHARGING → CHARGED`, or `→ PAYMENT_LINK_SENT → PAID`. A second payment for the same claim is refunded automatically.
+- **Security hold:** `src/lib/deposits.ts`, one hold per booking stored on `Booking` (`deposit*` fields). It's a manual-capture PaymentIntent created off-session with idempotency key `deposit-<bookingId>-<depositAttempts>`. Statuses: `SCHEDULED → PLACING → HELD → (RENEWING → HELD) → CAPTURING → CAPTURED`, or `→ RELEASED`, or `FAILED` (retried after the guest saves a card or the host clicks **Retry**). A renewal places the new hold **before** cancelling the old one. The hold is kept while a damage claim is open. `/api/cron/daily` drives it; the amount is fixed on the booking at creation.
+- **Prepaid block:** `createCheckoutSessionBlockingPrepaid` in `src/lib/stripe.ts` sends `funding_types_blocked` with a per-request API version (`2026-08-26.dahlia`) only on those calls; the rest of the app stays on the pinned version. If Stripe rejects the parameter, it creates the session without it and logs the error.
+- **Invoice webhooks:** `normalizeInvoice()` in `payments.ts` re-fetches an invoice on the pinned API version when the payload lacks `subscription`/`payment_intent` (webhook endpoints created on Stripe API 2025-03-31 or later). Don't remove it.
 - **Guest access:** the private token in `?t=` (`Booking.messageToken`) gates the booking page, messages, and cancel.
 
 ## 6. What was verified, and how
@@ -91,6 +99,8 @@ Tested in the build sandbox against a local Postgres-compatible database (PGlite
   - admin redirect when logged out, and admin pages with a session;
   - login lockout and iCal export.
 
+- **68 security-hold and prepaid checks:** tiers, placement timing, failure emails (once), daily retry, retry after a new card, outage recovery, renew-then-cancel-old, renewal failure, expiry, release 3 days after check-out, kept during an open claim, capture-then-remainder (including outage mid-way without double capture), payment link for the remainder only, cancellation release (before check-in vs mid-stay), stale-lock recovery, prepaid parameter + fallback, invoice normalization, subscription card update. Plus **22 HTTP checks** (cron auth, Terms text, guest page, admin controls, deposit route). Migration `0003` tested on a fresh database and on one matching production (existing data kept, no schema drift).
+
 **Not yet verified (do this in acceptance, §7):**
 - real Stripe test mode, end to end;
 - real Postgres under truly concurrent load (PGlite serializes connections);
@@ -108,11 +118,13 @@ Tested in the build sandbox against a local Postgres-compatible database (PGlite
 7. Send a guest message, then reply from admin.
 8. **Damage charge:** on a test booking whose check-out has passed, click **Report damage**. Then in the database set the claim's `chargeAfter` to the past (or wait 48h), click **Charge**, and confirm Stripe shows an off-session payment on the saved card. Repeat with Stripe's card `4000 0027 6000 3184` (requires authentication) and check that the guest gets a payment link that works.
 9. On a booking without a card, click **Ask guest to save a card**, complete the link, and confirm admin shows **Card on file: yes**.
-10. Review every page on a phone-sized screen.
+10. **Prepaid block:** book with Stripe's prepaid test card `5105 1051 0510 5100` → checkout refuses it. If it's accepted, check the server log for `[stripe] prepaid-card block rejected`.
+11. **Security hold:** book a stay starting tomorrow with `4242 4242 4242 4242` → Stripe shows an uncaptured $350 payment. Then on another booking save the card `4000 0000 0000 9995` (insufficient funds) via **Ask guest for a new card** and click **Retry hold** → the guest and host get failure emails.
+12. Review every page on a phone-sized screen.
 
 ## 8. Optional next work (in priority order)
 
-1. **Automatic iCal sync:** a cron route (Vercel Cron or GitHub Actions) that calls `syncIcalSource` for every source each hour, protected by a `CRON_SECRET`.
+1. **Automatic iCal sync:** add `syncIcalSource` for every source to `/api/cron/daily` (Vercel Hobby only allows daily crons).
 2. **Reminder emails:** before check-in (with access instructions) and before each monthly payment.
 3. **Per-property time zone** (currently UTC calendar days).
 4. **Automated tests:** port the checks from §6 into a real test suite (Vitest + a Postgres container).

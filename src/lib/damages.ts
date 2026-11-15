@@ -9,12 +9,14 @@ import type Stripe from "stripe";
 import type { Booking, DamageClaim, Property } from "@prisma/client";
 import { addHours, format, startOfDay } from "date-fns";
 import { prisma } from "./prisma";
-import { stripe } from "./stripe";
+import { createCheckoutSessionBlockingPrepaid, stripe } from "./stripe";
 import { SITE } from "./config";
 import { manageBookingPath } from "./booking";
 import { sendGuestEmail, sendOwnerAlert } from "./email";
 import { formatCents } from "./format";
 import { DAMAGE_MAX_CENTS, DAMAGE_NOTICE_HOURS } from "./policy";
+import { cardFailureReason, hasCardOnFile, resolveSavedCard } from "./cards";
+import { captureFromDeposit, placeDepositIfDue } from "./deposits";
 
 export class DamageError extends Error {}
 
@@ -48,9 +50,7 @@ const payUrl = (claim: DamageClaim, b: Booking) => `${SITE.url}/api/damage-claim
 const stayLabel = (b: BookingWithProperty) =>
   `${b.property.name} (${format(b.checkIn, "MMM d")} – ${format(b.checkOut, "MMM d, yyyy")})`;
 
-export function hasCardOnFile(b: Booking) {
-  return Boolean(b.stripePaymentMethodId || b.stripePaymentIntentId);
-}
+export { hasCardOnFile };
 
 // ── Phase 2a: file a claim and notify the guest ─────────────────────────────
 
@@ -90,9 +90,16 @@ export async function createDamageClaim(input: {
     }
   });
 
-  const cardLine = hasCardOnFile(b)
-    ? `Under Section 5 of our Terms, ${formatCents(claim.amount)} will be charged to the card you used for this booking on or after ${format(chargeAfter, "MMM d, yyyy 'at' h:mm a")} (UTC).`
-    : `You'll receive a secure link to pay ${formatCents(claim.amount)} on or after ${format(chargeAfter, "MMM d, yyyy")}.`;
+  const when = `on or after ${format(chargeAfter, "MMM d, yyyy 'at' h:mm a")} (UTC)`;
+  const cardLine =
+    b.depositStatus === "HELD"
+      ? claim.amount > (b.depositAmount ?? 0)
+        ? `Under Section 5 of our Terms, ${formatCents(b.depositAmount ?? 0)} will be taken from your security hold ${when}, ` +
+          `and the remaining ${formatCents(claim.amount - (b.depositAmount ?? 0))} charged to the card you used for this booking.`
+        : `Under Section 5 of our Terms, ${formatCents(claim.amount)} will be taken from your security hold ${when}.`
+      : hasCardOnFile(b)
+        ? `Under Section 5 of our Terms, ${formatCents(claim.amount)} will be charged to the card you used for this booking ${when}.`
+        : `You'll receive a secure link to pay ${formatCents(claim.amount)} ${when}.`;
   await sendGuestEmail(
     b.guestEmail,
     `Damage report for your stay at ${b.property.name}`,
@@ -104,19 +111,6 @@ export async function createDamageClaim(input: {
 }
 
 // ── Phase 2b: charge the saved card ─────────────────────────────────────────
-
-/** Finds the card saved for this booking (caches it on the booking). */
-async function resolveSavedCard(b: Booking): Promise<{ customer: string; paymentMethod: string } | null> {
-  if (!stripe) return null;
-  if (b.stripeCustomerId && b.stripePaymentMethodId) return { customer: b.stripeCustomerId, paymentMethod: b.stripePaymentMethodId };
-  if (!b.stripePaymentIntentId) return null;
-  const pi = await stripe.paymentIntents.retrieve(b.stripePaymentIntentId);
-  const customer = typeof pi.customer === "string" ? pi.customer : pi.customer?.id;
-  const paymentMethod = typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
-  if (!customer || !paymentMethod) return null;
-  await prisma.booking.update({ where: { id: b.id }, data: { stripeCustomerId: customer, stripePaymentMethodId: paymentMethod } });
-  return { customer, paymentMethod };
-}
 
 export type ChargeResult =
   | { outcome: "CHARGED"; claim: DamageClaim }
@@ -149,6 +143,42 @@ export async function chargeDamageClaim(claimId: string, now = new Date()): Prom
   }
   const s = stripe;
 
+  // 1. Take what we can from the security hold. Saved immediately, so a retry
+  //    after an error never takes it twice.
+  let fromDeposit = claim.fromDepositAmount;
+  if (fromDeposit === 0) {
+    try {
+      const cap = await captureFromDeposit(b.id, claim.amount);
+      if (cap.captured > 0) {
+        fromDeposit = cap.captured;
+        await prisma.damageClaim.update({
+          where: { id: claim.id },
+          data: { fromDepositAmount: fromDeposit, stripePaymentIntentId: cap.paymentIntentId }
+        });
+      }
+    } catch (err) {
+      await unlock(`Stripe error: ${(err as Error).message}`);
+      throw new DamageError("Stripe didn't respond as expected. Nothing was charged — try again in a few minutes.");
+    }
+  }
+  const remainder = claim.amount - fromDeposit;
+  const depositLine = fromDeposit > 0 ? `${formatCents(fromDeposit)} was taken from your security hold. ` : "";
+
+  if (remainder === 0) {
+    const charged = await prisma.damageClaim.update({
+      where: { id: claim.id },
+      data: { status: "CHARGED", chargedAt: new Date(), failureReason: null }
+    });
+    await sendGuestEmail(
+      b.guestEmail,
+      `Damage charge for your stay at ${b.property.name}`,
+      `Hi ${b.guestName},\n\nAs described in our notice, ${formatCents(claim.amount)} was taken from your security hold for:\n\n${claim.description}\n\n` +
+        `Any remaining hold has been released.\n\nQuestions? Reply through your booking page:\n${manageUrl(b)}`
+    );
+    return { outcome: "CHARGED", claim: charged };
+  }
+
+  // 2. Charge the rest to the saved card.
   let failure = "No card is on file for this booking.";
   try {
     const card = await resolveSavedCard(b);
@@ -156,7 +186,7 @@ export async function chargeDamageClaim(claimId: string, now = new Date()): Prom
       try {
         const pi = await s.paymentIntents.create(
           {
-            amount: claim.amount,
+            amount: remainder,
             currency: "usd",
             customer: card.customer,
             payment_method: card.paymentMethod,
@@ -166,7 +196,7 @@ export async function chargeDamageClaim(claimId: string, now = new Date()): Prom
             receipt_email: b.guestEmail,
             metadata: { kind: "damage", damageClaimId: claim.id, bookingId: b.id }
           },
-          { idempotencyKey: `damage-${claim.id}-${card.paymentMethod}` }
+          { idempotencyKey: `damage-${claim.id}-${card.paymentMethod}-${remainder}` }
         );
         if (pi.status === "succeeded") {
           const charged = await prisma.damageClaim.update({
@@ -176,37 +206,41 @@ export async function chargeDamageClaim(claimId: string, now = new Date()): Prom
           await sendGuestEmail(
             b.guestEmail,
             `Damage charge for your stay at ${b.property.name}`,
-            `Hi ${b.guestName},\n\nAs described in our notice, ${formatCents(claim.amount)} has been charged to your card on file for:\n\n${claim.description}\n\nQuestions? Reply through your booking page:\n${manageUrl(b)}`
+            `Hi ${b.guestName},\n\nAs described in our notice, ${formatCents(claim.amount)} has been collected for:\n\n${claim.description}\n\n` +
+              `${depositLine}${formatCents(remainder)} was charged to your card on file.\n\nQuestions? Reply through your booking page:\n${manageUrl(b)}`
           );
           return { outcome: "CHARGED", claim: charged };
         }
         failure = `Card charge returned status "${pi.status}".`;
         await s.paymentIntents.cancel(pi.id).catch(() => {});
       } catch (err) {
-        const e = err as { type?: string; code?: string; message?: string };
-        if (e.type !== "StripeCardError" && e.type !== "StripeInvalidRequestError") throw err;
-        failure =
-          e.code === "authentication_required"
-            ? "The guest's bank requires them to approve the charge."
-            : `The card was declined${e.message ? `: ${e.message}` : "."}`;
+        const reason = cardFailureReason(err);
+        if (!reason) throw err;
+        failure = reason;
       }
     }
   } catch (err) {
     await unlock(`Stripe error: ${(err as Error).message}`);
-    throw new DamageError("Stripe didn't respond as expected. Nothing was charged — try again in a few minutes.");
+    throw new DamageError(
+      fromDeposit > 0
+        ? `${formatCents(fromDeposit)} was taken from the security hold, but Stripe didn't respond for the remaining ${formatCents(remainder)}. Try again in a few minutes.`
+        : "Stripe didn't respond as expected. Nothing was charged — try again in a few minutes."
+    );
   }
 
-  // Fall back to a payment link the guest completes themselves.
+  // 3. Fall back to a payment link for the rest.
   const linked = await prisma.damageClaim.update({ where: { id: claim.id }, data: { status: "PAYMENT_LINK_SENT", failureReason: failure } });
   await sendGuestEmail(
     b.guestEmail,
     `Payment needed: damage charge for ${b.property.name}`,
-    `Hi ${b.guestName},\n\nWe couldn't charge your card on file for the damage we notified you about (${formatCents(claim.amount)}):\n\n` +
-      `${claim.description}\n\nPlease pay securely here:\n${payUrl(linked, b)}\n\nQuestions? Reply through your booking page:\n${manageUrl(b)}`
+    `Hi ${b.guestName},\n\nFor the damage we notified you about (${formatCents(claim.amount)}):\n\n${claim.description}\n\n` +
+      `${depositLine}We couldn't charge your card on file for the remaining ${formatCents(remainder)}. Please pay securely here:\n${payUrl(linked, b)}\n\n` +
+      `Questions? Reply through your booking page:\n${manageUrl(b)}`
   );
   await sendOwnerAlert(
     "Damage charge needs the guest",
-    `Couldn't charge ${b.guestName}'s card for ${formatCents(claim.amount)} at ${b.property.name}: ${failure}\nThe guest was emailed a payment link.`
+    `${fromDeposit > 0 ? `Took ${formatCents(fromDeposit)} from the security hold. ` : ""}Couldn't charge ${b.guestName}'s card ` +
+      `for ${formatCents(remainder)} at ${b.property.name}: ${failure}\nThe guest was emailed a payment link.`
   );
   return { outcome: "PAYMENT_LINK_SENT", claim: linked, reason: failure };
 }
@@ -238,7 +272,7 @@ export async function createDamagePaymentSession(claim: DamageClaim, b: BookingW
         quantity: 1,
         price_data: {
           currency: "usd",
-          unit_amount: claim.amount,
+          unit_amount: claim.amount - claim.fromDepositAmount,
           product_data: { name: `Damage charge — ${b.property.name}`, description: claim.description.slice(0, 500) }
         }
       }
@@ -274,18 +308,18 @@ export async function handleDamageCheckoutCompleted(session: Stripe.Checkout.Ses
   }
   await sendOwnerAlert(
     "Damage charge paid",
-    `${claim.booking.guestName} paid ${formatCents(claim.amount)} for damage at ${claim.booking.property.name}.`
+    `${claim.booking.guestName} paid ${formatCents(session.amount_total ?? claim.amount - claim.fromDepositAmount)} for damage at ${claim.booking.property.name}` +
+      (claim.fromDepositAmount > 0 ? ` (plus ${formatCents(claim.fromDepositAmount)} taken from the security hold).` : ".")
   );
 }
 
 // ── Phase 1 (for bookings without a card): save-card link (SetupIntent) ─────
 
-/** Emails the guest a link to save a card for this booking. */
+/** Emails the guest a link to save a card (or replace one that stopped working). */
 export async function requestCardOnFile(bookingId: string) {
   if (!stripe) throw new DamageError("Connect Stripe first.");
   const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { property: true } });
   if (!b) throw new DamageError("Booking not found");
-  if (b.stripePaymentMethodId) throw new DamageError("A card is already saved for this booking.");
   await prisma.booking.update({ where: { id: b.id }, data: { cardRequestedAt: new Date() } });
   await sendGuestEmail(
     b.guestEmail,
@@ -308,7 +342,7 @@ export async function createCardSetupSession(b: BookingWithProperty) {
     customer = c.id;
     await prisma.booking.update({ where: { id: b.id }, data: { stripeCustomerId: customer } });
   }
-  const session = await stripe.checkout.sessions.create({
+  const session = await createCheckoutSessionBlockingPrepaid({
     mode: "setup",
     customer,
     payment_method_types: ["card"],
@@ -334,5 +368,13 @@ export async function handleCardSetupCompleted(session: Stripe.Checkout.Session)
     data: { stripeCustomerId: customer, stripePaymentMethodId: paymentMethod },
     include: { property: true }
   });
+  // Long stays: future monthly payments use the new card too.
+  if (b.stripeSubscriptionId) {
+    await stripe.subscriptions.update(b.stripeSubscriptionId, { default_payment_method: paymentMethod }).catch((err) =>
+      console.error("[card] couldn't update subscription card", err)
+    );
+  }
   await sendOwnerAlert("Card saved", `${b.guestName} saved a card for their stay at ${stayLabel(b)}.`);
+  // A security hold that failed or is due can be placed right away.
+  await placeDepositIfDue(b.id);
 }
