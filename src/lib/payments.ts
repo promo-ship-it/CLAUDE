@@ -4,7 +4,7 @@ import type Stripe from "stripe";
 import type { Booking, Payment, Property } from "@prisma/client";
 import { addDays, format, startOfDay } from "date-fns";
 import { prisma } from "./prisma";
-import { stripe } from "./stripe";
+import { createCheckoutSessionBlockingPrepaid, stripe } from "./stripe";
 import { SITE } from "./config";
 import { manageBookingPath } from "./booking";
 import { notifyBooking } from "./notify";
@@ -36,15 +36,16 @@ export function nextInstallmentAmount(
 // ── Checkout ────────────────────────────────────────────────────────────────
 
 export async function createCheckoutSession(booking: Booking, property: Property, quote: Quote) {
-  const s = requireStripe();
+  requireStripe();
   const manage = `${SITE.url}${manageBookingPath(booking, property.slug)}`;
   const nightsLabel = `${quote.nights} night${quote.nights > 1 ? "s" : ""}`;
   const dates = `${format(booking.checkIn, "MMM d")} – ${format(booking.checkOut, "MMM d, yyyy")}`;
 
   let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
   // The card is saved to a Stripe customer for every booking: long stays need
-  // it for the monthly payments, and the Terms let the host charge documented
-  // damages after check-out (done from the Stripe dashboard).
+  // it for the monthly payments, and it's used for the security hold and any
+  // documented damages after check-out (Terms §5, deposits.ts / damages.ts).
+  // Prepaid cards are rejected at checkout (BLOCK_PREPAID_CARDS).
   const paymentIntentData: Stripe.Checkout.SessionCreateParams.PaymentIntentData = {
     metadata: { bookingId: booking.id },
     setup_future_usage: "off_session"
@@ -88,7 +89,7 @@ export async function createCheckoutSession(booking: Booking, property: Property
     ];
   }
 
-  const session = await s.checkout.sessions.create({
+  const session = await createCheckoutSessionBlockingPrepaid({
     mode: "payment",
     customer_email: booking.guestEmail,
     customer_creation: "always",
@@ -107,6 +108,11 @@ export async function createCheckoutSession(booking: Booking, property: Property
 // ── Webhook handlers ────────────────────────────────────────────────────────
 
 export async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
+  // Checkout is also used for damage payments and saving a card (damages.ts).
+  const kind = session.metadata?.kind;
+  if (kind === "damage") return (await import("./damages")).handleDamageCheckoutCompleted(session);
+  if (kind === "card_setup") return (await import("./damages")).handleCardSetupCompleted(session);
+
   const bookingId = session.metadata?.bookingId;
   if (!bookingId || session.payment_status !== "paid") return;
   const s = requireStripe();
@@ -137,18 +143,25 @@ export async function handleCheckoutCompleted(session: Stripe.Checkout.Session) 
     return;
   }
 
+  const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
   let subscriptionId: string | null = booking.stripeSubscriptionId;
   if (booking.paymentType === "STRIPE_RECURRING" && (booking.totalPayments ?? 1) > 1 && !subscriptionId) {
-    const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id;
     if (customerId) subscriptionId = await startMonthlyBilling(booking, booking.property, customerId, piId);
   }
 
   const updated = await prisma.booking.update({
     where: { id: bookingId },
-    data: { status: "CONFIRMED", stripePaymentIntentId: piId, stripeSubscriptionId: subscriptionId },
+    data: {
+      status: "CONFIRMED",
+      stripePaymentIntentId: piId,
+      stripeSubscriptionId: subscriptionId,
+      stripeCustomerId: booking.stripeCustomerId ?? customerId
+    },
     include: { property: true }
   });
   await notifyBooking(updated, updated.property, "CONFIRMED");
+  // Booked within a day of check-in: place the security hold right away.
+  await (await import("./deposits")).placeDepositIfDue(bookingId);
 }
 
 /**
@@ -184,10 +197,23 @@ async function startMonthlyBilling(booking: Booking, property: Property, custome
 }
 
 /** Records a monthly payment and keeps the subscription on the agreed schedule. */
-export async function handleInvoicePaid(invoice: Stripe.Invoice) {
-  const subId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
-  if (!subId || invoice.amount_paid <= 0) return; // trial / $0 invoices
+/**
+ * Webhook endpoints created on Stripe API version 2025-03-31 or later send
+ * invoices without `subscription` and `payment_intent`. Re-fetch those with
+ * the pinned API version so both endpoint versions work.
+ */
+async function normalizeInvoice(invoice: Stripe.Invoice): Promise<Stripe.Invoice> {
+  const fields = invoice as unknown as Record<string, unknown>;
+  if ("subscription" in fields && "payment_intent" in fields) return invoice;
+  return requireStripe().invoices.retrieve(invoice.id);
+}
+
+export async function handleInvoicePaid(rawInvoice: Stripe.Invoice) {
+  if (rawInvoice.amount_paid <= 0) return; // trial / $0 invoices
   const s = requireStripe();
+  const invoice = await normalizeInvoice(rawInvoice);
+  const subId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
+  if (!subId) return;
 
   let booking = await prisma.booking.findFirst({ where: { stripeSubscriptionId: subId } });
   if (!booking) {
@@ -222,7 +248,8 @@ export async function handleInvoicePaid(invoice: Stripe.Invoice) {
   }
 }
 
-export async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
+export async function handleInvoicePaymentFailed(rawInvoice: Stripe.Invoice) {
+  const invoice = await normalizeInvoice(rawInvoice);
   const subId = typeof invoice.subscription === "string" ? invoice.subscription : invoice.subscription?.id;
   if (!subId) return;
   const booking = await prisma.booking.findFirst({ where: { stripeSubscriptionId: subId }, include: { property: true } });
@@ -252,6 +279,7 @@ export async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
 }
 
 export async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
+  if (session.metadata?.kind) return; // expired damage-payment / save-card sessions need no action
   const bookingId = session.metadata?.bookingId;
   if (!bookingId) return;
   await prisma.booking.updateMany({
@@ -375,16 +403,25 @@ export async function cancelBooking(bookingId: string, actor: "GUEST" | "HOST", 
   }
 
   const note = notes.join(" ") || null;
+  const cancelledAt = new Date();
   await prisma.booking.update({
     where: { id: b.id },
     data: {
       status: "CANCELLED",
-      cancelledAt: new Date(),
+      cancelledAt,
       cancelledBy: actor,
       refundAmount: refunded,
       cancellationNote: [result.explanation, note].filter(Boolean).join(" ")
     }
   });
+
+  // No stay → release any security hold now. Cancelled mid-stay → the daily
+  // job keeps it for the release period after the guest leaves.
+  if (b.depositStatus && startOfDay(cancelledAt) <= startOfDay(b.checkIn)) {
+    await (await import("./deposits")).releaseDepositHold(b.id, "Booking cancelled before check-in.").catch((err) =>
+      console.error("[deposit] release on cancel failed", err)
+    );
+  }
 
   await sendCancellationEmails({
     guestEmail: b.guestEmail,

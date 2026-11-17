@@ -29,6 +29,8 @@ admin dashboard.
 | Messaging | Guest ↔ host chat per booking |
 | Calendar sync | iCal export per property + import Airbnb/VRBO calendars ("Sync now") |
 | Admin | Properties, bookings, calendar, smart pricing, one-click pricing setup, Stripe setup guide |
+| Damage charges | After check-out: notice with photos → 48h later, take it from the security hold, then the saved card → payment link if the card fails; save-card link for bookings without a card; $2,500 cap |
+| Security hold | Refundable $350 hold placed 1 day before check-in, renewed for long stays, released 3 days after check-out; prepaid cards refused (daily job: `/api/cron/daily`) |
 | Emails | Booking received/confirmed (with a private "manage booking" link), cancellations, failed-payment alerts |
 
 All money amounts are computed in one place (`src/lib/quote.ts`) — what the
@@ -86,6 +88,9 @@ src/lib/
   smart-pricing.ts         smart-pricing rules
   quote.ts                 final prices for each rate plan + long-stay payment schedule
   cancellation.ts          refund calculator (pure, no I/O)
+  damages.ts               damage claims, off-session charges, save-card (SetupIntent)
+  deposits.ts              security hold: place, renew, release, capture (daily job)
+  cards.ts                 saved-card lookup + card-failure messages
   booking.ts               creates bookings (serializable transaction)
   payments.ts              Stripe checkout, monthly billing, webhooks, cancellations/refunds
   email.ts, notify.ts      emails
@@ -99,6 +104,5 @@ scripts/migrate.mjs        applies migrations during build
 ## Known limitations
 - Single admin login (one email/password).
 - iCal import is manual ("Sync now") — add a scheduled job to automate it.
-- Damage charges are made from the Stripe dashboard (cards are saved at checkout); there's no in-app damage-claim UI.
 - No automated test suite in the repo (the logic was verified with throwaway scripts during development — see HANDOVER.md).
 - Times are compared in server time (UTC on Vercel); "days before check-in" means calendar days.

@@ -2,10 +2,13 @@
 
 import { useRef, useState } from "react";
 
-// Uploads directly into the sibling <textarea id="images-textarea">
-// rather than owning form state itself, so PropertyForm can stay a plain
-// server-rendered form using a server action.
-export default function ImageUploader() {
+// Uploads into a sibling <textarea> (by id) rather than owning form state
+// itself, so PropertyForm can stay a plain server-rendered form using a
+// server action.
+export default function ImageUploader({
+  targetId = "images-textarea",
+  hint = "Uploaded photos are added to the list below automatically — reorder or remove lines there; the first line is the cover photo."
+}: { targetId?: string; hint?: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +30,7 @@ export default function ImageUploader() {
           setError(data.error || "Upload failed");
           continue;
         }
-        const textarea = document.getElementById("images-textarea") as HTMLTextAreaElement | null;
+        const textarea = document.getElementById(targetId) as HTMLTextAreaElement | null;
         if (textarea) {
           textarea.value = textarea.value ? `${textarea.value}\n${data.url}` : data.url;
         }
@@ -62,10 +65,7 @@ export default function ImageUploader() {
           ))}
         </div>
       )}
-      <p className="text-xs text-ink/40 mt-1">
-        Uploaded photos are added to the list below automatically — reorder or remove lines there;
-        the first line is the cover photo.
-      </p>
+      <p className="text-xs text-ink/40 mt-1">{hint}</p>
     </div>
   );
 }

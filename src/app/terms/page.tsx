@@ -1,7 +1,15 @@
 import { SITE } from "@/lib/config";
+import { formatCents } from "@/lib/format";
 import {
   CHECK_IN_TIME,
   CHECK_OUT_TIME,
+  DAMAGE_MAX_CENTS,
+  DAMAGE_NOTICE_HOURS,
+  DEPOSIT_PLACE_DAYS_BEFORE,
+  DEPOSIT_RELEASE_DAYS,
+  DEPOSIT_TIERS,
+  PET_FEE_CENTS,
+  SMOKING_FEE_CENTS,
   GRACE_MIN_DAYS_BEFORE_CHECKIN,
   LONG_STAY_DISCOUNT_PERCENT,
   LONG_STAY_NIGHTS,
@@ -15,6 +23,24 @@ import {
   NON_REFUNDABLE_MIN_DAYS_BEFORE_CHECKIN,
   TERMS_VERSION
 } from "@/lib/policy";
+
+/** "$350" for one tier; otherwise "$350 for stays of 1–6 nights, $500 for 7+ nights". */
+function depositDescription(): string {
+  const tiers = [...DEPOSIT_TIERS].filter((t) => t.cents > 0).sort((a, b) => a.minNights - b.minNights);
+  if (tiers.length === 0) return "";
+  if (tiers.length === 1 && tiers[0].minNights <= 1) return formatCents(tiers[0].cents);
+  return tiers
+    .map((t, i) => {
+      const next = tiers[i + 1];
+      const range = next
+        ? next.minNights - 1 === t.minNights
+          ? `${t.minNights} night${t.minNights === 1 ? "" : "s"}`
+          : `${t.minNights}–${next.minNights - 1} nights`
+        : `${t.minNights}+ nights`;
+      return `${formatCents(t.cents)} for stays of ${range}`;
+    })
+    .join(", ");
+}
 
 // DRAFT — have a lawyer review before launch. Every number below comes from
 // src/lib/policy.ts, which is also what the refund calculator uses, so the
@@ -34,6 +60,7 @@ export default function TermsPage() {
             <li>For stays under {LONG_STAY_NIGHTS} nights, full payment is collected at the time of booking.</li>
             <li>For stays of {LONG_STAY_NIGHTS} nights or more, a {LONG_STAY_DISCOUNT_PERCENT}% long-stay discount applies and payment is collected monthly: the first payment (first 30 nights plus the cleaning fee) at booking, then automatic payments on the dates shown in your payment schedule. By booking a long stay, you authorize these charges to the card you provide. Billing stops automatically after the final payment.</li>
             <li>Your card is saved securely by our payment processor (Stripe) for the scheduled payments and for any charges described in Section 5.</li>
+            <li>Prepaid cards are not accepted.</li>
             <li>Bookings are confirmed only after successful payment (or host approval in Request-to-Book mode).</li>
           </ul>
         </section>
@@ -99,10 +126,16 @@ export default function TermsPage() {
           <ul className="list-disc list-inside space-y-2 text-sm">
             <li>Guest agrees to treat the property and its contents with reasonable care.</li>
             <li>Guest is responsible for any damage to the property, furnishings, appliances, or linens beyond normal wear and tear.</li>
-            <li>If damage is discovered after check-out, Host will notify Guest with a description and photos, and Guest authorizes Host to charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of $2,500.</li>
+            <li>If damage is discovered after check-out, Host will email Guest a description, the amount, and photos at least {DAMAGE_NOTICE_HOURS} hours before charging. Guest authorizes Host to then charge the payment method on file for the reasonable cost of repair or replacement, up to a maximum of {formatCents(DAMAGE_MAX_CENTS)} per booking in total. Guest can respond during that time through the messaging system.</li>
+            <li>If the payment method on file can&apos;t be charged, or there isn&apos;t one, Guest will be emailed a secure payment link. Host may also ask Guest to save a card for this purpose; nothing is charged when a card is saved.</li>
+            {depositDescription() && (
+              <li>
+                <strong>Security hold:</strong> for bookings paid online, a refundable authorization hold of {depositDescription()} is placed on Guest&apos;s card {DEPOSIT_PLACE_DAYS_BEFORE} day{DEPOSIT_PLACE_DAYS_BEFORE === 1 ? "" : "s"} before check-in. It is not a charge. For longer stays the hold is renewed automatically before it expires. It is released {DEPOSIT_RELEASE_DAYS} days after check-out, or when Host closes any damage claim, whichever is later. Damage charges under this Section are taken from the hold first, and any remainder is charged as described above. If the hold can&apos;t be placed, Guest will be emailed a link to provide a working card, and Host may withhold check-in instructions until a hold is in place.
+              </li>
+            )}
             <li>Guest agrees to report any damage or maintenance issues immediately via the messaging system or by contacting the Host directly.</li>
-            <li>Smoking inside any property is strictly prohibited. A $500 cleaning surcharge will be assessed if evidence of smoking is found.</li>
-            <li>Unauthorized pets may result in a $250 cleaning surcharge.</li>
+            <li>Smoking inside any property is strictly prohibited. A {formatCents(SMOKING_FEE_CENTS)} cleaning surcharge will be assessed if evidence of smoking is found.</li>
+            <li>Unauthorized pets may result in a {formatCents(PET_FEE_CENTS)} cleaning surcharge.</li>
           </ul>
         </section>
 

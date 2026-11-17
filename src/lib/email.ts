@@ -35,6 +35,7 @@ type BookingEmail = {
   policySummary: string;
   manageUrl: string;
   schedule?: { label: string; due: string; amount: string }[] | null;
+  depositLine?: string | null;
 };
 
 export async function sendBookingEmails(p: BookingEmail & { status: "PENDING" | "CONFIRMED" }) {
@@ -51,6 +52,7 @@ export async function sendBookingEmails(p: BookingEmail & { status: "PENDING" | 
       : `Thanks for requesting to book ${p.propertyName} (${p.checkIn} to ${p.checkOut}). We'll confirm within 24 hours. Estimated total: ${p.total}.`) +
     schedule +
     `\n\nCancellation policy (${p.policyName}): ${p.policySummary}` +
+    (p.depositLine ? `\n\n${p.depositLine}` : "") +
     `\n\nView your booking, message us, or cancel here:\n${p.manageUrl}` +
     `\n\nSee you soon!`;
 
@@ -91,4 +93,9 @@ export async function sendCancellationEmails(p: {
 /** Alert the host about something that needs manual attention (e.g. a failed payment). */
 export async function sendOwnerAlert(subject: string, body: string) {
   await send(SITE.supportEmail, `[${SITE.name}] ${subject}`, body);
+}
+
+/** Plain email to the guest (damage notices, payment links, card requests). */
+export async function sendGuestEmail(to: string, subject: string, body: string) {
+  await send(to, subject, body);
 }

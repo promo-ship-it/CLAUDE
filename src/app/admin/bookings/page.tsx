@@ -5,7 +5,18 @@ import { updateBookingStatus } from "@/lib/actions";
 import { format } from "date-fns";
 import AdminMessages from "@/components/AdminMessages";
 import CancelBooking from "@/components/CancelBooking";
-import { POLICY_NAMES, PENDING_PAYMENT_HOLD_MINUTES, type RatePlan } from "@/lib/policy";
+import DamageClaims from "@/components/DamageClaims";
+import DepositControls from "@/components/DepositControls";
+import { depositPlaceFrom, depositReleaseAt } from "@/lib/deposits";
+import { damageEligibility, hasCardOnFile } from "@/lib/damages";
+import { SITE } from "@/lib/config";
+import {
+  DAMAGE_MAX_CENTS,
+  DAMAGE_NOTICE_HOURS,
+  POLICY_NAMES,
+  PENDING_PAYMENT_HOLD_MINUTES,
+  type RatePlan
+} from "@/lib/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +26,12 @@ export default async function AdminBookingsPage() {
   await requireAdminPage();
   const bookings = await prisma.booking.findMany({
     orderBy: { createdAt: "desc" },
-    include: { property: true, payments: true, _count: { select: { messages: true } } }
+    include: {
+      property: true,
+      payments: true,
+      damageClaims: { orderBy: { createdAt: "asc" } },
+      _count: { select: { messages: true } }
+    }
   });
   const holdCutoff = Date.now() - PENDING_PAYMENT_HOLD_MINUTES * 60 * 1000;
 
@@ -32,6 +48,8 @@ export default async function AdminBookingsPage() {
           const isRequest = b.status === "PENDING" && b.paymentType === "INQUIRY";
           const awaitingPayment = b.status === "PENDING" && b.paymentType !== "INQUIRY";
           const abandoned = awaitingPayment && b.createdAt.getTime() < holdCutoff;
+          const damageReason = damageEligibility(b);
+          const claimed = b.damageClaims.filter((c) => c.status !== "CANCELLED").reduce((s, c) => s + c.amount, 0);
 
           return (
             <div key={b.id} className="p-4 text-sm">
@@ -89,6 +107,39 @@ export default async function AdminBookingsPage() {
                   )}
                 </div>
               </div>
+              {b.depositAmount && b.depositStatus && (
+                <DepositControls
+                  bookingId={b.id}
+                  amount={b.depositAmount}
+                  status={b.depositStatus}
+                  heldUntil={b.depositHeldUntil?.toISOString() ?? null}
+                  placeFrom={depositPlaceFrom(b).toISOString()}
+                  releaseAt={depositReleaseAt(b).toISOString()}
+                  captured={b.depositCapturedAmount}
+                  note={b.depositNote}
+                />
+              )}
+              {(damageReason === null || b.damageClaims.length > 0) && (
+                <DamageClaims
+                  bookingId={b.id}
+                  claims={b.damageClaims.map((c) => ({
+                    id: c.id,
+                    amount: c.amount,
+                    description: c.description,
+                    photoUrls: JSON.parse(c.photoUrls) as string[],
+                    status: c.status,
+                    fromDepositAmount: c.fromDepositAmount,
+                    chargeAfter: c.chargeAfter.toISOString(),
+                    failureReason: c.failureReason
+                  }))}
+                  eligibleReason={damageReason}
+                  capRemaining={Math.max(0, DAMAGE_MAX_CENTS - claimed)}
+                  hasCard={hasCardOnFile(b)}
+                  cardRequested={Boolean(b.cardRequestedAt)}
+                  paymentsEnabled={SITE.paymentsEnabled}
+                  noticeHours={DAMAGE_NOTICE_HOURS}
+                />
+              )}
               <AdminMessages bookingId={b.id} />
             </div>
           );

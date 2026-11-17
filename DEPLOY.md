@@ -36,6 +36,7 @@ for Production and Preview):
 | `STRIPE_SECRET_KEY` | for payments | see step 5 |
 | `STRIPE_PUBLISHABLE_KEY` | for payments | see step 5 |
 | `STRIPE_WEBHOOK_SECRET` | for payments | see step 5 — required whenever the secret key is set |
+| `CRON_SECRET` | for payments | 16+ random characters — `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. Protects the daily security-hold job. Without it, holds are never placed. |
 | `RESEND_API_KEY` | for email | see step 6 |
 | `NOTIFY_EMAIL` | for email | where booking/cancellation/payment alerts go |
 | `EMAIL_FROM` | optional | e.g. `Your Business <bookings@yourdomain.com>` |
@@ -60,6 +61,12 @@ npm start         # serves on $PORT (default 3000)
 On first deploy against an empty database the build creates all tables. If the
 database was created by an older version of this app (which used
 `prisma db push`), the build upgrades it in place without touching existing data.
+
+**Daily job:** `vercel.json` tells Vercel to call `/api/cron/daily` every day
+at 14:00 UTC (Vercel sends `CRON_SECRET` automatically). It places, renews, and
+releases security deposit holds. On any other host, schedule a daily request:
+`curl -H "Authorization: Bearer $CRON_SECRET" https://your-site/api/cron/daily`
+(cron, GitHub Actions, or a free service like cron-job.org).
 
 > GitHub + Vercel Hobby: if the repo is **private**, Vercel blocks deploys of
 > commits authored by anyone other than the account owner (including AI tools).

@@ -68,8 +68,18 @@ In Vercel: **Project → Settings → Environment Variables** (Production and Pr
   and issued through Stripe automatically. Long-stay notice balances are charged
   to the saved card.
 - **Unfinished checkouts** release the dates after about 35 minutes.
-- **Damage charges:** every card is saved to a Stripe customer. Charge documented
-  damages from the customer page in the Stripe dashboard.
+- **Damage charges:** every card is saved to a Stripe customer at checkout. After
+  a stay, file the claim from `/admin/bookings` → **Report damage**. The guest is
+  emailed the description and photos; after 48 hours you charge the saved card
+  off-session. If the charge fails, the guest is emailed a payment link. Bookings
+  without a card get a **save-card** link (Stripe Checkout in setup mode). These
+  use the same webhook events listed above.
+- **Security hold:** for every online booking, a refundable $350 hold (not a
+  charge) is placed on the saved card 1 day before check-in, renewed for long
+  stays, and released 3 days after check-out. Damage charges use it first. It
+  needs `CRON_SECRET` set (see DEPLOY.md) and no extra webhook events. In Stripe
+  holds show as **Uncaptured** payments.
+- **Prepaid cards** are refused at checkout and when saving a card.
 
 ## Troubleshooting
 
